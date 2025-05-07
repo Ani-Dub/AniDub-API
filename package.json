@@ -1,0 +1,26 @@
+{
+  "name": "anidub-api",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "author": "JonesBryan",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsdom": "^21.1.7",
+    "typescript": "^5.6.2"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.0",
+    "jsdom": "^25.0.0",
+    "mariadb": "^3.3.1",
+    "sequelize": "^6.37.3"
+  }
+}
