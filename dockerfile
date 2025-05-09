@@ -1,28 +1,34 @@
-# --------------> Build stage
-FROM node:22.12-alpine3.20 AS builder
+# syntax=docker/dockerfile:1.4
 
+############################
+# 1) Build Stage
+############################
+FROM node:22.12-alpine3.20 AS builder
 WORKDIR /usr/src/app
 
-COPY package*.json ./
-COPY tsconfig*.json ./
+# Cache deps
+COPY package*.json tsconfig*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --silent
 
-COPY ./src ./src
-RUN npm ci --quiet && npm run build
+# Build
+COPY src ./src
+RUN npm run build
 
-# --------------> Production stage
-FROM node:22.12-alpine3.20
-
-RUN apk add dumb-init
-
+############################
+# 2) Production Stage
+############################
+FROM gcr.io/distroless/nodejs:22
 WORKDIR /app
 
-ENV NODE_ENV=production
+# Copy manifests & artifacts
+COPY --from=builder /usr/src/app/package*.json ./
+COPY --from=builder /usr/src/app/dist ./dist
 
-COPY --chown=node:node package*.json ./
-COPY --chown=node:node --from=builder /usr/src/app/dist ./dist
+# Install prod deps
+RUN npm ci --omit=dev --silent
 
-RUN npm ci --quiet --only=production
+EXPOSE 3000
 
-USER node
-
-CMD ["dumb-init", "node", "dist/index.js"]
+# 2.5 Entrypoint
+CMD ["node", "dist/index.js"]
