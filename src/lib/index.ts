@@ -35,6 +35,9 @@ const GET_PLANNING_LIST_QUERY = (userId: string) => `
       }
       status(version: 2)
       episodes
+      coverImage {
+        extraLarge
+      }
     }
   }
 `;
@@ -49,6 +52,9 @@ const GET_MEDIA_BY_ID_QUERY = (anilistId: number) => `
       }
       status(version: 2)
       episodes
+      coverImage {
+        extraLarge
+      }
     }
   }
 `;

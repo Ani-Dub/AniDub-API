@@ -1,6 +1,7 @@
 import {
   ChatInputCommandInteraction,
   Client,
+  EmbedBuilder,
   Interaction,
   MessageFlags,
   REST,
@@ -8,41 +9,46 @@ import {
 } from "discord.js";
 import { DISCORD_CLIENT_ID, DISCORD_TOKEN } from "../config";
 import * as commands from "./commands";
+import { Dub } from "../database/Dub";
+import { UserDub } from "../database/UserDub";
+import { User } from "../database/User";
+import { fetchDubStatus } from "../lib/animeschedule";
 
-// Discord.js type for command execution
 type Command = (
   interaction: ChatInputCommandInteraction,
   bot: AniDubBot
 ) => Promise<void>;
 
 /**
- * AniDub Bot operates in a user's DMs and handles slash commands.
- * It links a Discord user to their Anilist account, allowing the bot
- * to check their lists for any new anime releases, and notify the user.
+ * AniDubBot - Handles slash commands in Discord DMs for dub notifications.
  */
 export default class AniDubBot extends Client {
-  private _commands: Map<string, Command> = new Map();
+  private readonly _commands = new Map<string, Command>();
 
   constructor() {
-    // Initialize the client with no intents, as this bot only uses interactions.
-    super({
-      intents: [],
-    });
-
-    this._init();
+    super({ intents: [] });
+    this._initialize();
   }
 
-  /**
-   * Handles incoming interactions, specifically slash commands.
-   * @param interaction The interaction received from Discord.
-   */
+  // Initialize event listeners and login
+  private async _initialize() {
+    this.once("ready", () => {
+      this._registerCommands();
+      this._scheduleDailyDubCheck();
+    });
+
+    this.on("interactionCreate", this._handleInteraction.bind(this));
+
+    await this.login(DISCORD_TOKEN);
+    console.log("AniDub Bot is running");
+  }
+
+  // Handle slash command interactions
   private async _handleInteraction(interaction: Interaction) {
-    // Ignore non-slash-command interactions.
     if (!interaction.isChatInputCommand()) return;
 
-    const incomingCommand = interaction as ChatInputCommandInteraction;
-
-    const command = this._commands.get(incomingCommand.commandName);
+    const { commandName } = interaction;
+    const command = this._commands.get(commandName);
 
     if (!command) {
       await interaction.reply({
@@ -52,52 +58,115 @@ export default class AniDubBot extends Client {
       return;
     }
 
-    await command(incomingCommand, this);
+    await command(interaction, this);
   }
 
-  /**
-   * Initializes the bot by setting up event listeners and logging in.
-   */
-  private async _init() {
-    // Tell Discord what commands this bot supports when it starts.
-    this.once("ready", () => {
-      this._updateCommands();
-    });
-
-    // Listen for interactions and handle them.
-    this.on("interactionCreate", (interaction) => {
-      this._handleInteraction(interaction);
-    });
-
-    await this.login(DISCORD_TOKEN);
-
-    console.log("AniDub Bot is running");
-  }
-
-  /**
-   * Updates the bot's commands in Discord.
-   * This is done by sending the command definitions to Discord's API.
-   */
-  private async _updateCommands() {
-    // Token will already be set by the login method.
+  // Register slash commands with Discord API and store local handlers
+  private async _registerCommands() {
     const rest = new REST().setToken(this.token!);
+    const commandEntries = Object.entries(commands);
 
-    // Get all commands in JSON format.
-    const cmds = Object.entries(commands).map(([name, { command }]) => {
+    const commandJSONs = commandEntries.map(([name, { command }]) => {
       console.log(`Registering command: ${name}`);
       return command.toJSON();
     });
 
-    // Send the commands to Discord's API.
-    const res = await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), {
-      body: cmds,
+    await rest.put(Routes.applicationCommands(DISCORD_CLIENT_ID), {
+      body: commandJSONs,
     });
 
-    // Store the command execution functions in a Map for easy access.
-    for (const [name, { command, execute }] of Object.entries(commands)) {
+    commandEntries.forEach(([name, { execute }]) => {
       this._commands.set(name, execute);
-    }
+    });
 
     console.log("Commands updated successfully");
+  }
+
+  // Sends a direct message to the specified Discord user
+  public async sendDM(discordId: string, message: string) {
+    try {
+      const user = await this.users.fetch(discordId);
+      await user?.send(message);
+    } catch (error) {
+      console.error(`Failed to send DM to ${discordId}:`, error);
+    }
+  }
+
+  // Schedules a check at midnight and repeats it daily
+  private _scheduleDailyDubCheck() {
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0);
+
+    const msUntilMidnight = midnight.getTime() - now.getTime();
+
+    setTimeout(() => {
+      this._checkDubsDaily();
+      setInterval(this._checkDubsDaily.bind(this), 24 * 60 * 60 * 1000);
+    }, msUntilMidnight);
+  }
+
+  // Checks the database for finished dubs and notifies users
+  private async _checkDubsDaily() {
+    const unfinishedDubs = await Dub.findAll({ where: { isReleasing: true } });
+
+    for (const dub of unfinishedDubs) {
+      const media = {
+        id: dub.anilistId,
+        type: "ANIME" as const,
+        title: { english: dub.name, romaji: dub.name },
+        coverImage: { extraLarge: dub.coverImage },
+        status: "RELEASING" as const,
+        episodes: dub.totalEpisodes,
+      };
+
+      const updated = await fetchDubStatus(media);
+      if (!updated) continue;
+
+      if (dub.isReleasing && !updated.isReleasing) {
+        await this._notifyUsersDubFinished(dub);
+      }
+
+      await dub.update({
+        hasDub: updated.hasDub,
+        isReleasing: updated.isReleasing,
+        dubbedEpisodes: updated.dubbedEpisodes,
+        totalEpisodes: updated.totalEpisodes,
+        nextAir: updated.nextAir,
+      });
+    }
+  }
+
+  // Notify all users tracking a specific dub that it has finished
+
+  private async _notifyUsersDubFinished(dub: Dub) {
+    const userDubs = await UserDub.findAll({ where: { dubId: dub.id } });
+
+    const embed = new EmbedBuilder()
+      .setTitle("🎉 Dub Completed!")
+      .setDescription(
+        `The dub for **${dub.name}** has officially finished airing.`
+      )
+      .setImage(dub.coverImage)
+      .setURL("https://anilist.co/anime/" + dub.anilistId)
+      .setColor(0x00bfff) // Light blue color
+      .setTimestamp()
+      .setFooter({
+        text: "AniDub Notifications",
+        iconURL: this.user?.displayAvatarURL() ?? undefined,
+      });
+
+    for (const userDub of userDubs) {
+      const user = await User.findByPk(userDub.userId);
+
+      if (user?.discordId) {
+        try {
+          const discordUser = await this.users.fetch(user.discordId);
+          await discordUser.send({ embeds: [embed] });
+        } catch (error) {
+          console.error(`Failed to send embed DM to ${user.discordId}:`, error);
+        }
+      }
+    }
   }
 }

@@ -56,10 +56,12 @@ const handleAnimeScheduleResponse = async (
 
   if (!isDubbed) {
     console.log(`No dub available for ${title}`);
-    return createDub(
+
+    return createOrUpdateDub(
       media.id,
       title!,
       anime.route,
+      media.coverImage.extraLarge,
       false,
       false,
       0,
@@ -73,10 +75,11 @@ const handleAnimeScheduleResponse = async (
   }
 
   // Completed dub
-  return createDub(
+  return createOrUpdateDub(
     media.id,
     title!,
     anime.route,
+    media.coverImage.extraLarge,
     true,
     false,
     anime.episodes,
@@ -98,10 +101,12 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
 
     if (!dubSection) {
       console.error(`No dub section found for ${anime.route}`);
-      return createDub(
+
+      return createOrUpdateDub(
         media.id,
         title!,
         anime.route,
+        media.coverImage.extraLarge,
         false,
         false,
         0,
@@ -113,17 +118,17 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
     const episodeStr = dubSection.children[0]?.textContent?.split(" ")[1];
     const episode = episodeStr ? parseInt(episodeStr, 10) : 0;
 
-    if (!episode) {
+    if (!episode)
       console.error(`Could not parse episode number for ${anime.route}`);
-    }
 
     const nextAir =
       dubSection.parentElement?.children[1]?.getAttribute("datetime");
 
-    return createDub(
+    return createOrUpdateDub(
       media.id,
       title!,
       anime.route,
+      media.coverImage.extraLarge,
       true,
       Boolean(nextAir),
       episode,
@@ -132,10 +137,12 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
     );
   } catch (error) {
     console.error(`Error scraping dub info for ${anime.route}:`, error);
-    return createDub(
+
+    return createOrUpdateDub(
       media.id,
       media.title.english || media.title.romaji!,
       anime.route,
+      media.coverImage.extraLarge,
       false,
       false,
       0,
@@ -145,25 +152,44 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
   }
 };
 
-// Factory function for creating Dub entries
-const createDub = async (
+// Factory function for creating or updating Dub entries
+const createOrUpdateDub = async (
   anilistId: number,
   name: string,
   slug: string,
+  coverImage: string,
   hasDub: boolean,
   isReleasing: boolean,
   dubbedEpisodes: number,
   totalEpisodes: number,
   nextAir: Date | null
 ): Promise<Dub> => {
-  return Dub.create({
-    anilistId,
-    name,
-    animescheduleSlug: slug,
-    hasDub,
-    isReleasing,
-    dubbedEpisodes,
-    totalEpisodes,
-    nextAir,
+  const [dub, created] = await Dub.findOrCreate({
+    where: { anilistId },
+    defaults: {
+      anilistId,
+      name,
+      coverImage,
+      animescheduleSlug: slug,
+      hasDub,
+      isReleasing,
+      dubbedEpisodes,
+      totalEpisodes,
+      nextAir,
+    },
   });
+
+  if (!created) {
+    await dub.update({
+      name,
+      animescheduleSlug: slug,
+      coverImage,
+      hasDub,
+      isReleasing,
+      dubbedEpisodes,
+      totalEpisodes,
+      nextAir,
+    });
+  }
+  return dub;
 };

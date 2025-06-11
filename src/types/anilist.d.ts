@@ -21,6 +21,9 @@ export type Media = {
     english: string | null;
     romaji: string | null;
   };
+  coverImage: {
+    extraLarge: string;
+  };
   status: MediaStatus;
   episodes: number | null;
 };

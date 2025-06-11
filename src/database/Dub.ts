@@ -15,6 +15,7 @@ export class Dub extends Model<
   declare anilistId: number;
   declare name: string;
   declare animescheduleSlug: string;
+  declare coverImage: string;
   declare hasDub: boolean;
   declare isReleasing: boolean;
   declare dubbedEpisodes: number;
@@ -37,13 +38,17 @@ export class Dub extends Model<
           allowNull: false,
         },
         name: {
-          type: DataTypes.TEXT("medium"),
+          type: DataTypes.TEXT,
           allowNull: false,
         },
         animescheduleSlug: {
-          type: DataTypes.TEXT("medium"),
+          type: DataTypes.TEXT,
           unique: true,
           allowNull: false,
+        },
+        coverImage: {
+          type: DataTypes.TEXT,
+          allowNull: true,
         },
         hasDub: {
           type: DataTypes.BOOLEAN,
