@@ -99,11 +99,10 @@ export interface Websites {
 
 export type TimeTableResponse = TimeTableResponseItem[];
 
-
 export interface TimeTableResponseItem {
   title: string;
   route: string;
-  romanji: string;
+  romaji: string;
   english: string;
   native: string;
   delayedFrom: string;

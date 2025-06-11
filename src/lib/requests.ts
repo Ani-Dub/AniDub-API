@@ -1,45 +1,47 @@
-import axios, { AxiosResponse, AxiosRequestConfig } from "axios";
+import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
 
-export const repeatablePOSTRequest = async <T>(url: string, data?: any, config?: AxiosRequestConfig<T>): Promise<AxiosResponse<T>> => {
-  const response = await axios.post<T>(url, data, config);
+const DEFAULT_RETRY_AFTER_MS = 1000;
+const MAX_RETRIES = 3;
 
-  // Ratelimit hit. Wait for the retry time and try again.
-  if (response.status === 429) {
-    const retryAfterTimestamp = response.headers["x-ratelimit-reset"];
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    let retryAfter = new Date(parseInt(retryAfterTimestamp) * 1000).getTime() - Date.now();
+const withRateLimitRetry = async <T>(
+  fn: () => Promise<AxiosResponse<T>>,
+  retriesLeft: number = MAX_RETRIES
+): Promise<AxiosResponse<T>> => {
+  const response = await fn();
 
-    if (retryAfterTimestamp === undefined) {
-      // If the header is not present, use a default value of 1 second
-      retryAfter = 1000;
-    }
+  if (response.status !== 429) return response;
 
-    console.log(`Ratelimit hit. Waiting for ${retryAfter}ms...`);
-
-    await new Promise((resolve) => setTimeout(resolve, retryAfter));
-    return repeatablePOSTRequest(url, data, config);
+  if (retriesLeft <= 0) {
+    throw new Error("Too many retries after hitting rate limit.");
   }
-  return response;
-}
 
-export const repeatableGETRequest = async <T>(url: string, config?: AxiosRequestConfig<T>): Promise<AxiosResponse<T>> => {
-  const response = await axios.get<T>(url, config);
+  const retryAfterHeader = response.headers["x-ratelimit-reset"];
+  const retryAfterMs = retryAfterHeader
+    ? Math.max(
+        new Date(parseInt(retryAfterHeader, 10) * 1000).getTime() - Date.now(),
+        DEFAULT_RETRY_AFTER_MS
+      )
+    : DEFAULT_RETRY_AFTER_MS;
 
-  // Ratelimit hit. Wait for the retry time and try again.
-  if (response.status === 429) {
-    const retryAfterTimestamp = response.headers["x-ratelimit-reset"];
+  console.warn(`Rate limit hit. Retrying in ${retryAfterMs}ms...`);
 
-    let retryAfter = new Date(parseInt(retryAfterTimestamp) * 1000).getTime() - Date.now();
+  await delay(retryAfterMs);
+  return withRateLimitRetry(fn, retriesLeft - 1);
+};
 
-    if (retryAfterTimestamp === undefined) {
-      // If the header is not present, use a default value of 1 second
-      retryAfter = 1000;
-    }
+export const repeatablePOSTRequest = async <T>(
+  url: string,
+  data?: any,
+  config?: AxiosRequestConfig<T>
+): Promise<AxiosResponse<T>> => {
+  return withRateLimitRetry(() => axios.post<T>(url, data, config));
+};
 
-    console.log(`Ratelimit hit. Waiting for ${retryAfter}ms...`);
-
-    await new Promise((resolve) => setTimeout(resolve, retryAfter));
-    return repeatableGETRequest(url, config);
-  }
-  return response;
-}
+export const repeatableGETRequest = async <T>(
+  url: string,
+  config?: AxiosRequestConfig<T>
+): Promise<AxiosResponse<T>> => {
+  return withRateLimitRetry(() => axios.get<T>(url, config));
+};

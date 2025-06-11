@@ -1,22 +1,37 @@
-import { ApplicationIntegrationType, ChatInputCommandInteraction, InteractionContextType, MessageFlags, SlashCommandBuilder } from "discord.js";
+import {
+  ApplicationIntegrationType,
+  ChatInputCommandInteraction,
+  InteractionContextType,
+  MessageFlags,
+  SlashCommandBuilder,
+} from "discord.js";
 import type AniDubBot from "..";
 import { CLIENT_ID, REDIRECT_URL } from "../../config";
 import { User } from "../../database/User";
 
-const linkUrl = `https://anilist.co/api/v2/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${REDIRECT_URL}&response_type=code`;
-
+// Create the slash command for linking AniList account.
+// Can be used anywhere
 const command = new SlashCommandBuilder()
   .setName("link")
   .setDescription("Get a link to connect your AniList account")
   .setIntegrationTypes(ApplicationIntegrationType.UserInstall)
-  .setContexts(InteractionContextType.BotDM);
+  .setContexts(InteractionContextType.BotDM, InteractionContextType.Guild);
 
-const execute = async (interaction: ChatInputCommandInteraction, bot: AniDubBot) => {
+const execute = async (
+  interaction: ChatInputCommandInteraction,
+  bot: AniDubBot
+) => {
   // Check if the user is already linked
-  const existingUser = await User.findOne({ where: { discordId: interaction.user.id } });
+  const existingUser = await User.findOne({
+    where: { discordId: interaction.user.id },
+  });
 
+  // If the user is already linked, inform them and exit.
   if (existingUser?.accessToken) {
-    await interaction.reply({ flags: [MessageFlags.Ephemeral], content: "Your account is already linked." });
+    await interaction.reply({
+      flags: [MessageFlags.Ephemeral],
+      content: "Your account is already linked.",
+    });
     return;
   }
 
@@ -31,12 +46,19 @@ const execute = async (interaction: ChatInputCommandInteraction, bot: AniDubBot)
     });
   }
 
-  const customLink = `${linkUrl}&state=${interaction.user.id}`;
+  const userLink = new URL("https://anilist.co/api/v2/oauth/authorize");
 
-  await interaction.reply({ flags: [MessageFlags.Ephemeral], content: `Link your account at ${customLink}` });
-}
+  userLink.searchParams.set("client_id", CLIENT_ID);
+  userLink.searchParams.set("redirect_uri", REDIRECT_URL);
+  userLink.searchParams.set("response_type", "code");
 
-export {
-  command,
-  execute,
+  // OAuth2 state allows us to pass custom information back to ourself from Anilist.
+  userLink.searchParams.set("state", interaction.user.id);
+
+  await interaction.reply({
+    flags: [MessageFlags.Ephemeral],
+    content: `Link your account at ${userLink.toString()}`,
+  });
 };
+
+export { command, execute };

@@ -1,4 +1,11 @@
-import { CreationOptional, DataTypes, InferAttributes, InferCreationAttributes, Model, Sequelize } from "sequelize";
+import {
+  CreationOptional,
+  DataTypes,
+  InferAttributes,
+  InferCreationAttributes,
+  Model,
+  Sequelize,
+} from "sequelize";
 
 export class Dub extends Model<
   InferAttributes<Dub>,
@@ -17,56 +24,59 @@ export class Dub extends Model<
   declare updatedAt: CreationOptional<Date>;
 
   static initModel(sequelize: Sequelize) {
-    Dub.init({
-      id: {
-        type: DataTypes.INTEGER.UNSIGNED,
-        primaryKey: true,
-        autoIncrement: true,
+    Dub.init(
+      {
+        id: {
+          type: DataTypes.INTEGER.UNSIGNED,
+          primaryKey: true,
+          autoIncrement: true,
+        },
+        anilistId: {
+          type: DataTypes.INTEGER.UNSIGNED,
+          unique: true,
+          allowNull: false,
+        },
+        name: {
+          type: DataTypes.TEXT("medium"),
+          allowNull: false,
+        },
+        animescheduleSlug: {
+          type: DataTypes.TEXT("medium"),
+          unique: true,
+          allowNull: false,
+        },
+        hasDub: {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+        },
+        isReleasing: {
+          type: DataTypes.BOOLEAN,
+          allowNull: false,
+        },
+        dubbedEpisodes: {
+          type: DataTypes.INTEGER.UNSIGNED,
+          allowNull: false,
+        },
+        totalEpisodes: {
+          type: DataTypes.INTEGER.UNSIGNED,
+          allowNull: false,
+        },
+        nextAir: {
+          type: DataTypes.DATE,
+          allowNull: true,
+        },
+        createdAt: {
+          type: DataTypes.DATE,
+          allowNull: false,
+          defaultValue: DataTypes.NOW,
+        },
+        updatedAt: {
+          type: DataTypes.DATE,
+          allowNull: false,
+          defaultValue: DataTypes.NOW,
+        },
       },
-      anilistId: {
-        type: DataTypes.INTEGER.UNSIGNED,
-        unique: true,
-        allowNull: false,
-      },
-      name: {
-        type: DataTypes.TEXT('medium'),
-        allowNull: false,
-      },
-      animescheduleSlug: {
-        type: DataTypes.TEXT('medium'),
-        unique: true,
-        allowNull: false,
-      },
-      hasDub: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-      },
-      isReleasing: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-      },
-      dubbedEpisodes: {
-        type: DataTypes.INTEGER.UNSIGNED,
-        allowNull: false,
-      },
-      totalEpisodes: {
-        type: DataTypes.INTEGER.UNSIGNED,
-        allowNull: false,
-      },
-      nextAir: {
-        type: DataTypes.DATE,
-        allowNull: true,
-      },
-      createdAt: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW,
-      },
-      updatedAt: {
-        type: DataTypes.DATE,
-        allowNull: false,
-        defaultValue: DataTypes.NOW,
-      },
-    }, { underscored: true, sequelize });
+      { underscored: true, sequelize }
+    );
   }
 }

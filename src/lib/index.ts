@@ -1,316 +1,186 @@
 import axios from "axios";
 import jwt, { JwtPayload } from "jsonwebtoken";
+
 import { Dub } from "../database/Dub";
 import { UserDub } from "../database/UserDub";
-import { AnimeScheduleSearchResponse, TimeTableResponse } from "../types/animeschedule";
-import { AnilistListResponse, MediaListEntry, Media, AnilistMediaResponse } from "../types/anilist";
+import { AnilistListResponse, Media, MediaListEntry } from "../types/anilist";
 import { User } from "../database/User";
-import { repeatableGETRequest, repeatablePOSTRequest } from "./requests";
-import { ANIMESCHEDULE_TOKEN } from "../config";
+import { repeatablePOSTRequest } from "./requests";
+import { fetchDubStatus } from "./animeschedule";
 
-// Prevent axios from throwing an error on non-2xx status codes
+// Prevent axios from throwing on non-2xx responses
 axios.defaults.validateStatus = () => true;
 
-export const syncUser = async (user: User, accessToken: string) => {
-  // decode jwt token to get user id
-  const { sub } = jwt.decode(accessToken) as JwtPayload;
-
-  if (!sub) {
-    console.error("Failed to decode access token");
-    return;
-  }
-
-  // Get all anime in the PLANNING list
-  const response = await repeatablePOSTRequest<AnilistListResponse>("https://graphql.anilist.co", {
-    query: `
-query {
-  MediaListCollection(userId: ${sub}, type: ANIME, status: PLANNING) {
-    lists {
-      name
-      entries {
-        ...mediaListEntry
+// GraphQL Queries
+const GET_PLANNING_LIST_QUERY = (userId: string) => `
+  query {
+    MediaListCollection(userId: ${userId}, type: ANIME, status: PLANNING) {
+      lists {
+        name
+        entries {
+          ...mediaListEntry
+        }
       }
     }
   }
-}
 
-fragment mediaListEntry on MediaList {
-  id
-  mediaId
-  media {
+  fragment mediaListEntry on MediaList {
     id
-    title {
-      english
+    mediaId
+    media {
+      id
+      title {
+        english
+        romaji
+      }
+      status(version: 2)
+      episodes
     }
-    status(version: 2)
-    episodes
   }
-}
-    `,
-  }, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
+`;
+
+const GET_MEDIA_BY_ID_QUERY = (anilistId: number) => `
+  query {
+    Media(id: ${anilistId}) {
+      id
+      title {
+        english
+        romaji
+      }
+      status(version: 2)
+      episodes
+    }
+  }
+`;
+
+// Syncs user's Anilist PLANNING list
+export const syncUser = async (
+  user: User,
+  accessToken: string
+): Promise<void> => {
+  const { sub: userId } = jwt.decode(accessToken) as JwtPayload;
+
+  if (!userId) {
+    console.error("Failed to decode Anilist access token.");
+    return;
+  }
+
+  const response = await repeatablePOSTRequest<AnilistListResponse>(
+    "https://graphql.anilist.co",
+    {
+      query: GET_PLANNING_LIST_QUERY(userId),
     },
-  });
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }
+  );
 
   if (response.status !== 200) {
-    console.error(`Failed to get planning list from Anilist: ${response.status}`);
+    console.error(`Anilist planning list fetch failed: ${response.status}`);
     return;
   }
 
-  const { data } = response.data;
-  const planningList = data.MediaListCollection.lists[0];
-
+  const planningList = response.data?.data?.MediaListCollection?.lists?.[0];
   if (!planningList) {
-    console.error("Failed to get planning list from Anilist (not found)");
+    console.warn(`No planning list found for user ${user.id}`);
     return;
   }
 
-  // Add all anime in the PLANNING list to the user
-  await Promise.all(planningList.entries.map((entry) => { addAnimeToUser(user, entry) }));
-}
+  await addAnimesToUser(user, planningList.entries);
+};
 
-// Add anime to user
-const addAnimeToUser = async (user: User, entry: MediaListEntry) => {
-  const { media } = entry;
+const addAnimesToUser = async (
+  user: User,
+  entries: MediaListEntry[]
+): Promise<void> => {
+  const validEntries = entries.filter(
+    (entry) =>
+      (entry.media.title.english || entry.media.title.romaji) &&
+      entry.media.episodes
+  );
 
-  // Check if the anime is already in the user's list
-  const userDub = await UserDub.findOne({
-    where: {
-      userId: user.id,
-      anilistId: media.id,
-    },
+  if (validEntries.length === 0) {
+    console.log(`User ${user.id} has no valid entries in their planning list.`);
+    return;
+  }
+
+  console.log(`Processing ${validEntries.length} anime for user ${user.id}.`);
+
+  const existingDubs = await Dub.findAll({
+    where: { anilistId: validEntries.map((e) => e.media.id) },
   });
 
-  if (userDub) return;
+  const existingAnilistIds = new Set(existingDubs.map((dub) => dub.anilistId));
 
-  // Find dub locally or create it.
-  const dub = await findOrCreateDub(media);
+  // Add user associations for existing dubs
+  for (const dub of existingDubs) {
+    await UserDub.findOrCreate({
+      where: {
+        userId: user.id,
+        anilistId: dub.anilistId,
+      },
+      defaults: {
+        dubId: dub.id,
+        userId: user.id,
+        anilistId: dub.anilistId,
+      },
+    });
+  }
 
+  const newEntries = validEntries.filter(
+    (entry) => !existingAnilistIds.has(entry.media.id)
+  );
+
+  console.log(`Found ${newEntries.length} new dubs to fetch.`);
+
+  for (const entry of newEntries) {
+    const dub = await fetchDubStatus(entry.media);
+    if (dub) {
+      await UserDub.create({
+        dubId: dub.id,
+        userId: user.id,
+        anilistId: entry.media.id,
+      });
+      console.log(`Added ${dub.name} (${dub.anilistId}) to user ${user.id}.`);
+    }
+  }
+};
+
+// Creates a Dub by Anilist ID and links it to the user
+export const createDubByAnilistId = async (
+  anilistId: number,
+  user: User
+): Promise<Dub | null> => {
+  const existing = await Dub.findOne({ where: { anilistId } });
+  if (existing) return existing;
+
+  const res = await repeatablePOSTRequest<{ data: { Media: Media } }>(
+    "https://graphql.anilist.co",
+    {
+      query: GET_MEDIA_BY_ID_QUERY(anilistId),
+    },
+    {
+      headers: { Authorization: `Bearer ${user.accessToken}` },
+    }
+  );
+
+  if (res.status !== 200) return null;
+
+  const media = res.data.data.Media;
+  const hasValidTitle = media.title.english || media.title.romaji;
+
+  if (!hasValidTitle || !media.episodes) return null;
+
+  const dub = await fetchDubStatus(media);
   if (!dub) {
-    console.error(`Failed to find or create dub for ${media.title.english} (${media.id})`);
-    return;
+    throw new Error(`Failed to fetch dub for Anilist ID ${anilistId}`);
   }
 
   await UserDub.create({
-    userId: user.id,
-    anilistId: media.id,
     dubId: dub.id,
-  });
-}
-
-// Find dub locally or create it.
-const findOrCreateDub = async (media: Media) => {
-  const existingDub = await Dub.findOne({
-    where: {
-      anilistId: media.id,
-    },
+    userId: user.id,
+    anilistId,
   });
 
-  if (existingDub) return existingDub;
-
-  return await createDub(media);
-}
-
-// Date api uses for null.
-const zeroDate = "0001-01-01T00:00:00Z";
-
-const createDub = async (media: Media) => {
-  // Some anime that are don't have an airing date won't have a title.
-  if (!media.title.english) {
-    console.error(`No english title for ${JSON.stringify(media)}`);
-    return;
-  }
-
-  // Some anime that are don't have an airing date won't have episodes.
-  if (!media.episodes) {
-    console.error(`No episodes for ${JSON.stringify(media)}`);
-    return;
-  }
-
-
-  const res = await repeatableGETRequest<AnimeScheduleSearchResponse>("https://animeschedule.net/api/v3/anime", {
-    params: {
-      'anilist-ids': media.id,
-    },
-    headers: {
-      Authorization: `Bearer ${ANIMESCHEDULE_TOKEN}`,
-    }
-  });
-
-  if (res.status !== 200) {
-    console.error(JSON.stringify(res.data));
-    console.error(`Failed to get ${JSON.stringify(media)} from AnimeSchedule: ${res.status}`);
-    return;
-  }
-
-  const { anime } = res.data;
-
-  // Found multiple anime for the same anilist id
-  // should never happen.
-  if (anime.length !== 1) {
-    console.error(JSON.stringify(res.data));
-    console.error(`Found ${anime.length} anime for ${JSON.stringify(media)} in AnimeSchedule`);
-    return;
-  }
-
-  const targetAnime = anime[0];
-
-  const dubPremierValid = targetAnime.dubPremier && targetAnime.dubPremier !== zeroDate;
-  const dubTimeValid = targetAnime.dubTime && targetAnime.dubTime !== zeroDate;
-
-  // Sometimes dubPremier is not set, but dubTime is.
-  // Also, sometimes dubTime is set, but when its the same as jpnTime, it means the anime is not dubbed.
-  const dubExists = (dubPremierValid || dubTimeValid) && targetAnime.dubTime !== targetAnime.jpnTime;
-
-  const baseOptions = {
-    anilistId: media.id,
-    name: media.title.english,
-    animescheduleSlug: targetAnime.route,
-    hasDub: false,
-    isReleasing: false,
-    dubbedEpisodes: 0,
-    totalEpisodes: media.episodes,
-    nextAir: null,
-  }
-
-
-  if (!dubExists) {
-    console.log(`Dub not found for ${media.title.english}`);
-
-    return await Dub.create({
-      ...baseOptions,
-    })
-  }
-
-  const dubTime = dubTimeValid ? new Date(targetAnime.dubTime) : null;
-
-  // Assume dub has finished
-  if (!dubTime) {
-    console.log(`Assuming dub has finished for ${media.title.english} (no dub time)`);
-
-    return await Dub.create({
-      ...baseOptions,
-      hasDub: true,
-      dubbedEpisodes: targetAnime.episodes,
-      isReleasing: false,
-      nextAir: null,
-    })
-  }
-
-  const dubEpisode = await getNextDubEpisode(targetAnime.route, dubTime);
-
-  // Assume dub has finished
-  if (dubEpisode.episode === -1 || dubEpisode.time === null) {
-    console.log(`Assuming dub has finished for ${media.title.english} (no dub episode)`);
-
-    return await Dub.create({
-      ...baseOptions,
-      hasDub: true,
-      dubbedEpisodes: targetAnime.episodes,
-      isReleasing: false,
-      nextAir: null,
-    })
-  }
-
-  const dubDate = new Date(dubEpisode.time);
-
-  const thisEpisodeDubbed = dubDate.getTime() < Date.now();
-
-  const dubbedEpisodes = thisEpisodeDubbed ? dubEpisode.episode : dubEpisode.episode - 1;
-
-  console.log(`Dub found for ${media.title.english} (episode ${dubEpisode.episode})`);
-
-  return await Dub.create({
-    anilistId: media.id,
-    name: media.title.english,
-    animescheduleSlug: targetAnime.route,
-    hasDub: true,
-    isReleasing: true,
-    dubbedEpisodes: dubbedEpisodes,
-    totalEpisodes: media.episodes,
-    nextAir: dubDate,
-  })
-}
-
-// Get the next dub episode for a given route and dub time
-const getNextDubEpisode = async (route: string, dubTime: Date) => {
-  const year = dubTime.getFullYear();
-  const weekNumber = getWeekNumber(dubTime);
-
-  const res = await repeatableGETRequest<TimeTableResponse>("https://animeschedule.net/api/v3/timetables/dub", {
-    params: {
-      year: year.toString(),
-      week: weekNumber.toString(),
-    },
-    headers: {
-      Authorization: `Bearer ${ANIMESCHEDULE_TOKEN}`,
-    }
-  });
-
-  if (res.status !== 200) {
-    console.error(JSON.stringify(res.data));
-    console.error(`Failed to get timetable for ${route}: ${res.status}`);
-    return { episode: -1, time: null };
-  }
-
-  const targetAnime = res.data.find((anime) => {
-    return anime.route === route;
-  });
-
-  if (!targetAnime) {
-    console.error(`Failed to find ${route} in timetable`);
-    return { episode: -1, time: null };
-  }
-
-  return {
-    episode: targetAnime.episodeNumber,
-    time: targetAnime.episodeDate,
-  }
-}
-
-const getWeekNumber = (date: Date) => {
-  const d = new Date(date.valueOf());
-  const dayNum = (d.getDay() + 6) % 7;
-
-  d.setDate(d.getDate() - dayNum + 3);
-
-  const firstThu = new Date(d.getFullYear(), 0, 4);
-
-  const diff = d.valueOf() - firstThu.valueOf();
-
-  return 1 + Math.floor(diff / 604800000);
-}
-
-export const createDubByAnilistId = async (anilistId: number) => {
-  const res = await repeatablePOSTRequest<AnilistMediaResponse>("https://graphql.anilist.co", {
-    query: `
-query {
-  Media(id: ${anilistId}) {
-    id
-    type
-    title {
-      english
-    }
-    status(version: 2)
-    episodes
-  }
-}
-    `,
-  });
-
-  if (res.status !== 200) {
-    console.error(`Failed to get anime from Anilist: ${res.status}`);
-    return;
-  }
-
-  const { data } = res.data;
-  const media = data.Media;
-
-  if (!media) {
-    console.error("Failed to get anime from Anilist (not found)");
-    return;
-  }
-
-  return await createDub(media);
-}
+  return dub;
+};

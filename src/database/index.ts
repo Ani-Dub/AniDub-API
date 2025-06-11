@@ -5,7 +5,7 @@ import { Dub } from "./Dub";
 import { UserDub } from "./UserDub";
 
 export const sequelize = new Sequelize({
-  dialect: 'mariadb',
+  dialect: "mariadb",
   host: DB_HOST,
   port: DB_PORT,
   username: DB_USER,

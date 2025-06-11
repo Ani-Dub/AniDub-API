@@ -1,17 +1,29 @@
-export type MediaListCollections = "CURRENT" | "COMPLETED" | "PLANNING" | "DROPPED" | "PAUSED" | "REPEATING";
+export type MediaListCollections =
+  | "CURRENT"
+  | "COMPLETED"
+  | "PLANNING"
+  | "DROPPED"
+  | "PAUSED"
+  | "REPEATING";
 
 export type MediaType = "ANIME" | "MANGA";
-export type MediaStatus = "FINISHED" | "RELEASING" | "NOT_YET_RELEASED" | "CANCELLED" | "HIATUS";
+export type MediaStatus =
+  | "FINISHED"
+  | "RELEASING"
+  | "NOT_YET_RELEASED"
+  | "CANCELLED"
+  | "HIATUS";
 
 export type Media = {
   id: number;
   type: MediaType;
   title: {
     english: string | null;
-  }
+    romaji: string | null;
+  };
   status: MediaStatus;
   episodes: number | null;
-}
+};
 
 export interface MediaListEntry {
   id: number;
@@ -27,13 +39,13 @@ export interface AnilistListResponse {
       lists: {
         name: MediaListCollections;
         entries: MediaListEntry[];
-      }[]
-    }
-  }
+      }[];
+    };
+  };
 }
 
 export interface AnilistMediaResponse {
   data: {
-    Media: Media
-  }
+    Media: Media;
+  };
 }
