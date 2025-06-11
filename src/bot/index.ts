@@ -138,7 +138,6 @@ export default class AniDubBot extends Client {
   }
 
   // Notify all users tracking a specific dub that it has finished
-
   private async _notifyUsersDubFinished(dub: Dub) {
     const userDubs = await UserDub.findAll({ where: { dubId: dub.id } });
 
@@ -149,7 +148,7 @@ export default class AniDubBot extends Client {
       )
       .setImage(dub.coverImage)
       .setURL("https://anilist.co/anime/" + dub.anilistId)
-      .setColor(0x00bfff) // Light blue color
+      .setColor(0x00bfff)
       .setTimestamp()
       .setFooter({
         text: "AniDub Notifications",
