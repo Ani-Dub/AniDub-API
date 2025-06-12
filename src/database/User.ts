@@ -13,6 +13,7 @@ export class User extends Model<
 > {
   declare id: CreationOptional<number>;
   declare discordId: string;
+  declare nonce: string;
   declare accessToken: string | null;
   declare refreshToken: string | null;
   declare expiresAt: Date | null;
@@ -31,6 +32,11 @@ export class User extends Model<
           type: DataTypes.BIGINT,
           unique: true,
           allowNull: false,
+        },
+        nonce: {
+          type: DataTypes.STRING(36),
+          allowNull: false,
+          unique: true,
         },
         accessToken: {
           type: DataTypes.TEXT("medium"),

@@ -35,11 +35,14 @@ const execute = async (
     return;
   }
 
+  const nonce = crypto.randomUUID();
+
   // Create a new user now so we can link them to the interaction.
   // Prevents people from linking to discord accounts they don't own.
   if (!existingUser) {
     await User.create({
       discordId: interaction.user.id,
+      nonce,
       accessToken: null,
       refreshToken: null,
       expiresAt: null,
@@ -53,7 +56,7 @@ const execute = async (
   userLink.searchParams.set("response_type", "code");
 
   // OAuth2 state allows us to pass custom information back to ourself from Anilist.
-  userLink.searchParams.set("state", interaction.user.id);
+  userLink.searchParams.set("state", nonce);
 
   await interaction.reply({
     flags: [MessageFlags.Ephemeral],

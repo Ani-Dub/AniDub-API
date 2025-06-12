@@ -29,8 +29,9 @@ app.get("/oauth2/callback", async (req, res) => {
 
   if (!code || !state) return res.status(400).send("Missing code or state");
 
-  const discordId = state as string;
-  const user = await User.findOne({ where: { discordId } });
+  const nonce = state as string;
+  const user = await User.findOne({ where: { nonce } });
+
   if (!user) return res.status(404).send("User not found");
   if (user.accessToken) return res.status(400).send("User already linked");
 
