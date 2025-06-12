@@ -12,7 +12,7 @@ import { fetchDubStatus } from "./animeschedule";
 axios.defaults.validateStatus = () => true;
 
 // GraphQL Queries
-const GET_PLANNING_LIST_QUERY = (userId: string) => `
+export const GET_PLANNING_LIST_QUERY = (userId: string) => `
   query {
     MediaListCollection(userId: ${userId}, type: ANIME, status: PLANNING) {
       lists {
@@ -42,7 +42,7 @@ const GET_PLANNING_LIST_QUERY = (userId: string) => `
   }
 `;
 
-const GET_MEDIA_BY_ID_QUERY = (anilistId: number) => `
+export const GET_MEDIA_BY_ID_QUERY = (anilistId: number) => `
   query {
     Media(id: ${anilistId}) {
       id
@@ -58,6 +58,27 @@ const GET_MEDIA_BY_ID_QUERY = (anilistId: number) => `
     }
   }
 `;
+
+export const validateMedia = (media: Media): boolean => {
+  const hasValidTitle = media.title.english || media.title.romaji;
+
+  if (!hasValidTitle) {
+    console.warn(`Media ${media.id} has no valid title.`);
+    return false;
+  }
+
+  if (!media.episodes) {
+    console.warn(`Media ${media.id} has no episodes.`);
+    return false;
+  }
+
+  if (media.status === "NOT_YET_RELEASED") {
+    console.warn(`Media ${media.id} is not yet released.`);
+    return false;
+  }
+
+  return true;
+};
 
 // Syncs user's Anilist PLANNING list
 export const syncUser = async (
@@ -86,11 +107,7 @@ export const syncUser = async (
     return;
   }
 
-  const planningList = response.data?.data?.MediaListCollection?.lists?.[0];
-  if (!planningList) {
-    console.warn(`No planning list found for user ${user.id}`);
-    return;
-  }
+  const planningList = response.data.data.MediaListCollection.lists[0];
 
   await addAnimesToUser(user, planningList.entries);
 };
@@ -99,11 +116,7 @@ const addAnimesToUser = async (
   user: User,
   entries: MediaListEntry[]
 ): Promise<void> => {
-  const validEntries = entries.filter(
-    (entry) =>
-      (entry.media.title.english || entry.media.title.romaji) &&
-      entry.media.episodes
-  );
+  const validEntries = entries.filter((entry) => validateMedia(entry.media));
 
   if (validEntries.length === 0) {
     console.log(`User ${user.id} has no valid entries in their planning list.`);
@@ -193,3 +206,4 @@ export const createDubByAnilistId = async (
 
 //TODO: Don't auto-add users to dubs not on their planning list
 //TODO: Add user's completed list to dubs, and series sequels
+//TODO: Instead of fetching all dubs on /list, just get the user's planning list again
