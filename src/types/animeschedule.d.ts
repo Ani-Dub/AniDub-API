@@ -96,3 +96,27 @@ export interface Websites {
   crunchyroll: string;
   youtube: string;
 }
+
+export type TimeTableResponse = TimeTableResponseItem[];
+
+export interface TimeTableResponseItem {
+  title: string;
+  route: string;
+  romaji: string;
+  english: string;
+  native: string;
+  delayedFrom: string;
+  delayedUntil: string;
+  status: "Ongoing" | "Finished" | "Delayed" | "Upcoming";
+  episodeDate: string;
+  episodeNumber: number;
+  subtractedEpisodeNumber: number;
+  episodes: number;
+  lengthMin: number;
+  donghua: boolean;
+  airType: "sub" | "dub" | "raw";
+  mediaTypes: [];
+  imageVersionRoute: string;
+  streams: {};
+  airingStatus: "airing" | "aired" | "unaired" | "delayed-air";
+}
