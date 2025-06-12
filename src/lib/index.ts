@@ -190,3 +190,6 @@ export const createDubByAnilistId = async (
 
   return dub;
 };
+
+//TODO: Don't auto-add users to dubs not on their planning list
+//TODO: Add user's completed list to dubs, and series sequels

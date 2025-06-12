@@ -17,13 +17,29 @@ const withRateLimitRetry = async <T>(
     throw new Error("Too many retries after hitting rate limit.");
   }
 
-  const retryAfterHeader = response.headers["x-ratelimit-reset"];
-  const retryAfterMs = retryAfterHeader
+  const resetTimeHeader = response.headers["x-ratelimit-reset"];
+
+  if (!resetTimeHeader) {
+    const retryAfterHeader = response.headers["retry-after"];
+
+    if (retryAfterHeader) {
+      const retryAfterMs = parseInt(retryAfterHeader, 10) * 1000;
+      console.warn(`Rate limit hit. Retrying in ${retryAfterMs}ms...`);
+      await delay(retryAfterMs);
+      return withRateLimitRetry(fn, retriesLeft - 1);
+    }
+  }
+
+  const retryAfterMs = resetTimeHeader
     ? Math.max(
-        new Date(parseInt(retryAfterHeader, 10) * 1000).getTime() - Date.now(),
+        new Date(parseInt(resetTimeHeader, 10) * 1000).getTime() - Date.now(),
         DEFAULT_RETRY_AFTER_MS
       )
     : DEFAULT_RETRY_AFTER_MS;
+
+  if (retryAfterMs === DEFAULT_RETRY_AFTER_MS) {
+    console.log(response.headers);
+  }
 
   console.warn(`Rate limit hit. Retrying in ${retryAfterMs}ms...`);
 

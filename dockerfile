@@ -11,24 +11,28 @@ COPY package*.json tsconfig*.json ./
 RUN --mount=type=cache,target=/root/.npm \
   npm ci --silent
 
-# Build
+# Build the app
 COPY src ./src
 RUN npm run build
+
+# Prepare production dependencies separately
+FROM node:22.12-alpine3.20 AS prod-deps
+WORKDIR /app
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm \
+  npm ci --omit=dev --silent
 
 ############################
 # 2) Production Stage
 ############################
-FROM gcr.io/distroless/nodejs:22
+FROM gcr.io/distroless/nodejs22-debian12:latest
 WORKDIR /app
 
-# Copy manifests & artifacts
+# Copy only what's needed
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /usr/src/app/package*.json ./
 COPY --from=builder /usr/src/app/dist ./dist
 
-# Install prod deps
-RUN npm ci --omit=dev --silent
-
 EXPOSE 3000
 
-# 2.5 Entrypoint
-CMD ["node", "dist/index.js"]
+CMD ["dist/index.js"]
