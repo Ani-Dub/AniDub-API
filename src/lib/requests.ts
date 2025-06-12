@@ -37,10 +37,6 @@ const withRateLimitRetry = async <T>(
       )
     : DEFAULT_RETRY_AFTER_MS;
 
-  if (retryAfterMs === DEFAULT_RETRY_AFTER_MS) {
-    console.log(response.headers);
-  }
-
   console.warn(`Rate limit hit. Retrying in ${retryAfterMs}ms...`);
 
   await delay(retryAfterMs);

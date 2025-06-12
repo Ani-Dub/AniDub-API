@@ -1,6 +1,8 @@
 import express from "express";
 import cors from "cors";
 import axios from "axios";
+import { LRUCache } from "lru-cache";
+
 import { CLIENT_ID, CLIENT_SECRET, REDIRECT_URL } from "../config";
 import { User } from "../database/User";
 import { createDubByAnilistId, syncUser } from "../lib";
@@ -10,6 +12,19 @@ export const app = express();
 
 app.use(express.json());
 app.use(cors());
+
+const dubCache = new LRUCache<number, any>({
+  max: 1000, // max items
+  ttl: 10 * 60 * 1000, // 10 minutes in ms
+});
+
+function getCachedDub(anilistId: number) {
+  return dubCache.get(anilistId) || null;
+}
+
+function setCachedDub(anilistId: number, dub: any) {
+  dubCache.set(anilistId, dub);
+}
 
 // Helper: Exchange code for token
 const fetchAccessToken = async (code: string) => {
@@ -99,26 +114,61 @@ app.post("/list", async (req, res) => {
       parseInt(item.toString().trim(), 10)
     );
 
-    const existingDubs = await Dub.findAll({
-      where: { anilistId: itemList },
-      attributes: [
-        "anilistId",
-        "hasDub",
-        "isReleasing",
-        "dubbedEpisodes",
-        "totalEpisodes",
-        "nextAir",
-      ],
-    });
+    // Try to get dubs from cache first
+    const cachedDubs: any[] = [];
+    const idsToFetch: number[] = [];
+    for (const id of itemList) {
+      const cached = getCachedDub(id);
+      if (cached) {
+        cachedDubs.push(cached);
+      } else {
+        idsToFetch.push(id);
+      }
+    }
+
+    const existingDubs =
+      idsToFetch.length > 0
+        ? await Dub.findAll({
+            where: { anilistId: idsToFetch },
+            attributes: [
+              "anilistId",
+              "hasDub",
+              "isReleasing",
+              "dubbedEpisodes",
+              "totalEpisodes",
+              "nextAir",
+            ],
+          })
+        : [];
+
+    // Cache found dubs
+    for (const dub of existingDubs) {
+      setCachedDub(dub.anilistId, dub);
+    }
 
     const existingIds = new Set(existingDubs.map((dub) => dub.anilistId));
-    const missingIds = itemList.filter((id) => !existingIds.has(id));
+    const missingIds = idsToFetch.filter((id) => !existingIds.has(id));
+
+    console.log(
+      `Found ${cachedDubs.length} cached dubs, ${existingDubs.length} existing dubs, and ${missingIds.length} missing dubs to create.`
+    );
+
+    console.log(`Missing IDs: ${missingIds.join(", ")}`);
 
     const newDubs = await Promise.all(
       missingIds.map((id) => createDubByAnilistId(id, user))
     );
 
-    const allDubs = [...existingDubs, ...newDubs.filter(Boolean)];
+    // Cache new dubs
+    for (const dub of newDubs) {
+      if (dub) setCachedDub(dub.anilistId, dub);
+    }
+
+    const allDubs = [
+      ...cachedDubs,
+      ...existingDubs,
+      ...newDubs.filter(Boolean),
+    ];
 
     return res.status(200).json({ allDubs, token: user.accessToken });
   } catch (error) {
