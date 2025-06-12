@@ -16,7 +16,7 @@ const router = express.Router();
 // Middleware: Require Bearer token
 router.use(async (req, res, next) => {
   const token = req.headers.authorization;
-  if (!token) return res.status(401).send("Missing authorization token");
+  if (!token) return res.status(401).json({ error: "Missing authorization token" });
 
   req.token = token;
 
@@ -24,7 +24,7 @@ router.use(async (req, res, next) => {
     const user = await User.findOne({ where: { accessToken: token } });
 
     if (!user || !user.accessToken || !user.refreshToken || !user.expiresAt) {
-      return res.status(401).send("Invalid authorization token");
+      return res.status(401).json({ error: "Invalid authorization token" });
     }
 
     if (user.expiresAt < new Date()) {
@@ -52,7 +52,7 @@ router.get("/list", async (req, res) => {
   const user = req.user as User;
 
   if (!user || !user.accessToken) {
-    return res.status(401).send("Unauthorized: Missing user or access token");
+    return res.status(401).json({ error: "Unauthorized: Missing user or access token" });
   }
 
   try {
@@ -69,7 +69,10 @@ router.get("/list", async (req, res) => {
     );
 
     if (response.status !== 200) {
-      return res.status(500).send("Failed to fetch planning list from Anilist");
+      res
+        .status(500)
+        .json({ error: "Failed to fetch planning list from Anilist" });
+      return;
     }
 
     const entries = response.data.data.MediaListCollection.lists[0].entries;
@@ -90,7 +93,7 @@ router.get("/list", async (req, res) => {
     return res.status(200).json({ allDubs: dubs, token: user.accessToken });
   } catch (error) {
     console.error("Error in /list:", error);
-    return res.status(500).send("Internal server error");
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -98,11 +101,11 @@ router.get("/list", async (req, res) => {
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
 
-  if (!id) return res.status(400).send("Missing Anilist ID");
+  if (!id) return res.status(400).json({ error: "Missing Anilist ID" });
 
   const anilistId = parseInt(id, 10);
 
-  if (isNaN(anilistId)) return res.status(400).send("Invalid Anilist ID");
+  if (isNaN(anilistId)) return res.status(400).json({ error: "Invalid Anilist ID" });
 
   try {
     let dub = await Dub.findOne({
@@ -124,29 +127,32 @@ router.get("/:id", async (req, res) => {
       );
 
       if (response.status !== 200) {
-        return res.status(404).send("Dub not found or could not be created");
+        return res.status(404).json({ error: "Dub not found or could not be created" });
       }
 
       const media = response.data.data.Media;
 
       if (!media) {
-        return res.status(404).send("Media not found");
+        return res.status(404).json({ error: "Media not found" });
       }
 
       if (!validateMedia(media)) {
-        return res.status(400).send("Invalid media data");
+        return res.status(400).json({ error: "Invalid media data" });
       }
 
       dub = await fetchDubStatus(media);
 
       if (!dub) {
-        return res.status(404).send("Dub not found or could not be created");
+        res
+          .status(404)
+          .json({ error: "Dub not found or could not be created" });
+        return;
       }
     }
-    return res.status(200).json(dub);
+    res.status(200).json(dub);
   } catch (error) {
     console.error("Error in /:id:", error);
-    return res.status(500).send("Internal server error");
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

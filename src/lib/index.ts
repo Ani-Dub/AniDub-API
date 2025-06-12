@@ -206,4 +206,3 @@ export const createDubByAnilistId = async (
 
 //TODO: Don't auto-add users to dubs not on their planning list
 //TODO: Add user's completed list to dubs, and series sequels
-//TODO: Instead of fetching all dubs on /list, just get the user's planning list again
