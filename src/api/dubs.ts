@@ -21,7 +21,7 @@ router.use(async (req, res, next) => {
   req.token = token;
 
   try {
-    const user = await User.findOne({ where: { accessToken: token } });
+    const user = await User.findOne({ where: { nonce: token } });
 
     if (!user || !user.accessToken || !user.refreshToken || !user.expiresAt) {
       return res.status(401).json({ error: "Invalid authorization token" });

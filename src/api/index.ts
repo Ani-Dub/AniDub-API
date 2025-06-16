@@ -9,10 +9,10 @@ import dubsRouter from "./dubs";
 
 export const app = express();
 
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
-// === OAuth Helpers ===
+// === Helper: Fetch Access Token from Anilist ===
 const fetchAccessToken = async (code: string) => {
   return axios.post("https://anilist.co/api/v2/oauth/token", {
     client_id: CLIENT_ID,
@@ -23,21 +23,57 @@ const fetchAccessToken = async (code: string) => {
   });
 };
 
-// === OAuth Callback Route ===
+// === Helper: Render Success HTML Page ===
+const renderSuccessPage = (nonce: string): string => `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Account Linked</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 10vh; }
+    .success { color: #2ecc40; font-size: 1.5em; margin-bottom: 1em; }
+    .info { color: #555; }
+    .blocked {
+      color: transparent;
+      background: #ccc;
+      border-radius: 4px;
+      user-select: none;
+      font-size: 1.2em;
+      letter-spacing: 0.2em;
+      padding: 0.2em 0.5em;
+      margin: 1em auto;
+      width: fit-content;
+      filter: blur(6px);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="success">Successfully linked your account!</div>
+  <div class="info">You can close this window.</div>
+  <div class="blocked" id="anidub-nonce">${nonce}</div>
+</body>
+</html>
+`;
+
+// === OAuth Callback Handler ===
 app.get("/oauth2/callback", async (req, res) => {
   const { code, state } = req.query;
 
-  if (!code || !state) return res.status(400).send("Missing code or state");
-
-  const nonce = state as string;
-  const user = await User.findOne({ where: { nonce } });
-
-  if (!user) return res.status(404).send("User not found");
-  if (user.accessToken) return res.status(400).send("User already linked");
+  if (typeof code !== "string" || typeof state !== "string") {
+    return res.status(400).send("Missing or invalid code/state");
+  }
 
   try {
-    const tokenRes = await fetchAccessToken(code as string);
-    const { access_token, refresh_token, expires_in } = tokenRes.data;
+    const user = await User.findOne({ where: { nonce: state } });
+
+    if (!user) return res.status(404).send("User not found");
+    if (user.accessToken) return res.status(400).send("User already linked");
+
+    const tokenResponse = await fetchAccessToken(code);
+    const { access_token, refresh_token, expires_in } = tokenResponse.data;
 
     await user.update({
       accessToken: access_token,
@@ -47,12 +83,12 @@ app.get("/oauth2/callback", async (req, res) => {
 
     syncUser(user, access_token);
 
-    return res.status(200).send("Successfully linked your account!");
-  } catch (err) {
-    console.error("OAuth callback error:", err);
+    return res.status(200).send(renderSuccessPage(user.nonce));
+  } catch (error) {
+    console.error("OAuth callback error:", error);
     return res.status(500).send("Failed to get access token from Anilist");
   }
 });
 
-// Mount the dubs router under /dubs (or /api/dubs if you want)
+// === Mount Routers ===
 app.use("/dubs", dubsRouter);
