@@ -13,6 +13,7 @@ import { Dub } from "../database/Dub";
 import { UserDub } from "../database/UserDub";
 import { User } from "../database/User";
 import { fetchDubStatus } from "../lib/animeschedule";
+import { syncUser } from "../lib";
 
 type Command = (
   interaction: ChatInputCommandInteraction,
@@ -109,6 +110,12 @@ export default class AniDubBot extends Client {
   // Checks the database for finished dubs and notifies users
   private async _checkDubsDaily() {
     const unfinishedDubs = await Dub.findAll({ where: { isReleasing: true } });
+
+    const users = await User.findAll();
+
+    for (const user of users) {
+      await syncUser(user);
+    }
 
     for (const dub of unfinishedDubs) {
       const media = {

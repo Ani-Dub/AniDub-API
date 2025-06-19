@@ -1,11 +1,14 @@
 import {
+  Association,
   CreationOptional,
   DataTypes,
   InferAttributes,
   InferCreationAttributes,
   Model,
+  NonAttribute,
   Sequelize,
 } from "sequelize";
+import { UserDub } from "./UserDub";
 
 export class Dub extends Model<
   InferAttributes<Dub>,
@@ -23,6 +26,12 @@ export class Dub extends Model<
   declare nextAir: Date | null;
   declare createdAt: CreationOptional<Date>;
   declare updatedAt: CreationOptional<Date>;
+
+  declare UserDubs?: NonAttribute<UserDub[]>;
+
+  declare static associations: {
+    UserDub: Association<Dub, UserDub>;
+  };
 
   static initModel(sequelize: Sequelize) {
     Dub.init(

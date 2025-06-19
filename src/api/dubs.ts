@@ -4,19 +4,23 @@ import { Dub } from "../database/Dub";
 import { User } from "../database/User";
 import { repeatablePOSTRequest, refreshAccessToken } from "../lib/requests";
 import { fetchDubStatus } from "../lib/animeschedule";
-import { AnilistListResponse, Media } from "../types/anilist";
-import {
-  GET_MEDIA_BY_ID_QUERY,
-  GET_PLANNING_LIST_QUERY,
-  validateMedia,
-} from "../lib";
+import { Media } from "../types/anilist";
+import { GET_MEDIA_BY_ID_QUERY, syncUser, validateMedia } from "../lib";
+import { UserDub } from "../database/UserDub";
+import rateLimit from "express-rate-limit";
 
 const router = express.Router();
 
+const limiter = rateLimit({
+  windowMs: 500,
+  limit: 5,
+});
+
 // Middleware: Require Bearer token
-router.use(async (req, res, next) => {
+router.use(limiter, async (req, res, next) => {
   const token = req.headers.authorization;
-  if (!token) return res.status(401).json({ error: "Missing authorization token" });
+  if (!token)
+    return res.status(401).json({ error: "Missing authorization token" });
 
   req.token = token;
 
@@ -52,7 +56,9 @@ router.get("/list", async (req, res) => {
   const user = req.user as User;
 
   if (!user || !user.accessToken) {
-    return res.status(401).json({ error: "Unauthorized: Missing user or access token" });
+    return res
+      .status(401)
+      .json({ error: "Unauthorized: Missing user or access token" });
   }
 
   try {
@@ -62,33 +68,26 @@ router.get("/list", async (req, res) => {
 
     if (!userId) return res.status(400).send("Invalid access token");
 
-    const response = await repeatablePOSTRequest<AnilistListResponse>(
-      "https://graphql.anilist.co",
-      { query: GET_PLANNING_LIST_QUERY(userId) },
-      { headers: { Authorization: `Bearer ${user.accessToken}` } }
-    );
+    await syncUser(user);
 
-    if (response.status !== 200) {
-      res
-        .status(500)
-        .json({ error: "Failed to fetch planning list from Anilist" });
-      return;
-    }
-
-    const entries = response.data.data.MediaListCollection.lists[0].entries;
-    const anilistIds = entries.map((entry) => entry.media.id);
-
-    const dubs = await Dub.findAll({
-      where: { anilistId: anilistIds },
-      attributes: [
-        "anilistId",
-        "hasDub",
-        "isReleasing",
-        "dubbedEpisodes",
-        "totalEpisodes",
-        "nextAir",
+    const userDubs = await UserDub.findAll({
+      where: { userId: user.id },
+      include: [
+        {
+          model: Dub,
+          attributes: [
+            "anilistId",
+            "hasDub",
+            "isReleasing",
+            "dubbedEpisodes",
+            "totalEpisodes",
+            "nextAir",
+          ],
+        },
       ],
     });
+
+    const dubs = userDubs.map((userDub) => userDub.Dub!);
 
     return res.status(200).json({ allDubs: dubs, token: user.accessToken });
   } catch (error) {
@@ -105,7 +104,8 @@ router.get("/:id", async (req, res) => {
 
   const anilistId = parseInt(id, 10);
 
-  if (isNaN(anilistId)) return res.status(400).json({ error: "Invalid Anilist ID" });
+  if (isNaN(anilistId))
+    return res.status(400).json({ error: "Invalid Anilist ID" });
 
   try {
     let dub = await Dub.findOne({
@@ -127,7 +127,9 @@ router.get("/:id", async (req, res) => {
       );
 
       if (response.status !== 200) {
-        return res.status(404).json({ error: "Dub not found or could not be created" });
+        return res
+          .status(404)
+          .json({ error: "Dub not found or could not be created" });
       }
 
       const media = response.data.data.Media;

@@ -17,3 +17,11 @@ export const sequelize = new Sequelize({
 User.initModel(sequelize);
 Dub.initModel(sequelize);
 UserDub.initMode(sequelize);
+
+User.hasMany(UserDub);
+UserDub.belongsTo(User);
+
+Dub.hasMany(UserDub);
+UserDub.belongsTo(Dub);
+
+Dub.belongsToMany(User, { through: UserDub });

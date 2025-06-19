@@ -81,11 +81,10 @@ export const validateMedia = (media: Media): boolean => {
 };
 
 // Syncs user's Anilist PLANNING list
-export const syncUser = async (
-  user: User,
-  accessToken: string
-): Promise<void> => {
-  const { sub: userId } = jwt.decode(accessToken) as JwtPayload;
+export const syncUser = async (user: User): Promise<void> => {
+  const token = user.accessToken!;
+
+  const { sub: userId } = jwt.decode(token) as JwtPayload;
 
   if (!userId) {
     console.error("Failed to decode Anilist access token.");
@@ -98,7 +97,7 @@ export const syncUser = async (
       query: GET_PLANNING_LIST_QUERY(userId),
     },
     {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${token}` },
     }
   );
 
@@ -110,9 +109,10 @@ export const syncUser = async (
   const planningList = response.data.data.MediaListCollection.lists[0];
 
   await addAnimesToUser(user, planningList.entries);
+  await removeStaleEntries(user, planningList.entries);
 };
 
-const addAnimesToUser = async (
+export const addAnimesToUser = async (
   user: User,
   entries: MediaListEntry[]
 ): Promise<void> => {
@@ -204,5 +204,21 @@ export const createDubByAnilistId = async (
   return dub;
 };
 
-//TODO: Don't auto-add users to dubs not on their planning list
+export const removeStaleEntries = async (
+  user: User,
+  entries: MediaListEntry[]
+) => {
+  const userDubs = await UserDub.findAll({ where: { id: user.id } });
+
+  const staleUserDub = userDubs.filter(
+    (userDub) => !entries.find((entry) => entry.id === userDub.dubId)
+  );
+
+  console.log(`Found ${staleUserDub.length} stale dubs to remove.`);
+
+  for (const staleDub of staleUserDub) {
+    await staleDub.destroy();
+  }
+};
+
 //TODO: Add user's completed list to dubs, and series sequels

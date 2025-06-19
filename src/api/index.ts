@@ -81,7 +81,7 @@ app.get("/oauth2/callback", async (req, res) => {
       expiresAt: new Date(Date.now() + expires_in * 1000),
     });
 
-    syncUser(user, access_token);
+    syncUser(user);
 
     return res.status(200).send(renderSuccessPage(user.nonce));
   } catch (error) {
