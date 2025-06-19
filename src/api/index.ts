@@ -12,6 +12,8 @@ export const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.set('trust proxy', 1);
+
 // === Helper: Fetch Access Token from Anilist ===
 const fetchAccessToken = async (code: string) => {
   return axios.post("https://anilist.co/api/v2/oauth/token", {
