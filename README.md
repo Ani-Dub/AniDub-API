@@ -2,6 +2,12 @@
 
 AniDub API is a Node.js/TypeScript backend for syncing and tracking anime dubs using AniList and AnimeSchedule. It provides OAuth2 login, user sync, and endpoints for fetching dub status for anime in a user's AniList planning list.
 
+<p align="center" width="100%">
+    <img width="33%" src="https://github.com/user-attachments/assets/8c80c5a6-dafc-462b-9945-8fef70a8f274">  
+   <br/>
+   <em>Example Discord notification</em>
+</p>
+
 ## Features
 - OAuth2 login with AniList
 - Syncs user's AniList planning list
