@@ -2,6 +2,8 @@ import axios from "axios";
 import jwt, { JwtPayload } from "jsonwebtoken";
 
 import { Dub } from "../database/Dub";
+import { Op } from "sequelize";
+import { Sequel } from "../database/Sequel";
 import { UserDub } from "../database/UserDub";
 import { AnilistListResponse, Media, MediaListEntry } from "../types/anilist";
 import { User } from "../database/User";
@@ -14,7 +16,7 @@ axios.defaults.validateStatus = () => true;
 // GraphQL Queries
 export const GET_PLANNING_LIST_QUERY = (userId: string) => `
   query {
-    MediaListCollection(userId: ${userId}, type: ANIME, status: PLANNING) {
+    MediaListCollection(userId: ${userId}, type: ANIME) {
       lists {
         name
         entries {
@@ -38,6 +40,22 @@ export const GET_PLANNING_LIST_QUERY = (userId: string) => `
       coverImage {
         extraLarge
       }
+      relations {
+        nodes {
+          id
+          title {
+            english
+            romaji
+          }
+          type
+        }
+        edges {
+          relationType
+          node {
+            id
+          }
+        }
+      }
     }
   }
 `;
@@ -54,6 +72,22 @@ export const GET_MEDIA_BY_ID_QUERY = (anilistId: number) => `
       episodes
       coverImage {
         extraLarge
+      }
+      relations {
+        nodes {
+          id
+          title {
+            english
+            romaji
+          }
+          type
+        }
+        edges {
+          relationType
+          node {
+            id
+          }
+        }
       }
     }
   }
@@ -106,10 +140,18 @@ export const syncUser = async (user: User): Promise<void> => {
     return;
   }
 
-  const planningList = response.data.data.MediaListCollection.lists[0];
+  const allLists = response.data.data.MediaListCollection.lists;
+  // Filter out Dropped lists
+  const filteredLists = allLists.filter(
+    (list: { name: string }) => list.name !== "Dropped"
+  );
+  // Flatten all entries from filtered lists
+  const allEntries = filteredLists.flatMap(
+    (list: { entries: MediaListEntry[] }) => list.entries
+  );
 
-  await addAnimesToUser(user, planningList.entries);
-  await removeStaleEntries(user, planningList.entries);
+  await addAnimesToUser(user, allEntries);
+  await removeStaleEntries(user, allEntries);
 };
 
 export const addAnimesToUser = async (
@@ -161,6 +203,36 @@ export const addAnimesToUser = async (
         anilistId: entry.media.id,
       });
       console.log(`Added ${dub.name} (${dub.anilistId}) to user ${user.id}.`);
+    }
+  }
+
+  // Store sequels for all valid entries (not just new)
+  for (const entry of validEntries) {
+    if (entry.media.relations && entry.media.relations.edges) {
+      for (const edge of entry.media.relations.edges) {
+        if (edge.relationType === "SEQUEL" && edge.node && edge.node.id) {
+          console.log(
+            `Processing sequel for media ${entry.media.id}: ${edge.node.id}`
+          );
+          try {
+            await Sequel.findOrCreate({
+              where: {
+                anilistId: entry.media.id,
+                sequelId: edge.node.id,
+              },
+              defaults: {
+                anilistId: entry.media.id,
+                sequelId: edge.node.id,
+              },
+            });
+          } catch (err) {
+            console.warn(
+              `Failed to create sequel for media ${entry.media.id}: ${edge.node.id}`,
+              err
+            );
+          }
+        }
+      }
     }
   }
 };
@@ -220,5 +292,3 @@ export const removeStaleEntries = async (
     await staleDub.destroy();
   }
 };
-
-//TODO: Add user's completed list to dubs, and series sequels

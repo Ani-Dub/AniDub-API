@@ -26,6 +26,22 @@ export type Media = {
   };
   status: MediaStatus;
   episodes: number | null;
+  relations?: {
+    nodes: {
+      id: number;
+      title: {
+        english: string | null;
+        romaji: string | null;
+      };
+      type: string;
+    }[];
+    edges: {
+      relationType: string;
+      node: {
+        id: number;
+      };
+    }[];
+  };
 };
 
 export interface MediaListEntry {

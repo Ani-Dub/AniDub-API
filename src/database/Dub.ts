@@ -9,6 +9,7 @@ import {
   Sequelize,
 } from "sequelize";
 import { UserDub } from "./UserDub";
+import { Sequel } from "./Sequel";
 
 export class Dub extends Model<
   InferAttributes<Dub>,
@@ -28,9 +29,11 @@ export class Dub extends Model<
   declare updatedAt: CreationOptional<Date>;
 
   declare UserDubs?: NonAttribute<UserDub[]>;
+  declare sequels?: NonAttribute<Sequel[]>;
 
   declare static associations: {
     UserDub: Association<Dub, UserDub>;
+    sequels: Association<Dub, Sequel>;
   };
 
   static initModel(sequelize: Sequelize) {

@@ -1,6 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import { Dub } from "../database/Dub";
+import { Sequel } from "../database/Sequel";
 import { User } from "../database/User";
 import { repeatablePOSTRequest, refreshAccessToken } from "../lib/requests";
 import { fetchDubStatus } from "../lib/animeschedule";
@@ -70,8 +71,10 @@ router.get("/list", async (req, res) => {
 
     await syncUser(user);
 
+    // Single query: get all dubs for user and their sequels
     const userDubs = await UserDub.findAll({
       where: { userId: user.id },
+      attributes: ["id", "anilistId"],
       include: [
         {
           model: Dub,
@@ -83,13 +86,25 @@ router.get("/list", async (req, res) => {
             "totalEpisodes",
             "nextAir",
           ],
+          include: [
+            {
+              model: Sequel,
+              attributes: ["sequelId"],
+              required: false, // Include dubs without sequels
+            },
+          ],
         },
       ],
     });
 
-    const dubs = userDubs.map((userDub) => userDub.Dub!);
-
-    return res.status(200).json({ allDubs: dubs, token: user.accessToken });
+    return res.status(200).json({
+      allDubs: userDubs.map((userDub) => {
+        return {
+          ...userDub.Dub?.get({ plain: true }),
+        };
+      }),
+      token: user.accessToken,
+    });
   } catch (error) {
     console.error("Error in /list:", error);
     res.status(500).json({ error: "Internal server error" });
