@@ -158,10 +158,18 @@ export const addAnimesToUser = async (
   user: User,
   entries: MediaListEntry[]
 ): Promise<void> => {
-  const validEntries = entries.filter((entry) => validateMedia(entry.media));
+  // Accept all entries, but log and skip only those with no title
+  const validEntries = entries.filter((entry) => {
+    const hasValidTitle = entry.media.title.english || entry.media.title.romaji;
+    if (!hasValidTitle) {
+      console.warn(`Media ${entry.media.id} has no valid title.`);
+      return false;
+    }
+    return true;
+  });
 
   if (validEntries.length === 0) {
-    console.log(`User ${user.id} has no valid entries in their planning list.`);
+    console.log(`User ${user.id} has no valid entries in their list.`);
     return;
   }
 
@@ -188,6 +196,7 @@ export const addAnimesToUser = async (
     });
   }
 
+  // Accept new entries even if not released
   const newEntries = validEntries.filter(
     (entry) => !existingAnilistIds.has(entry.media.id)
   );
@@ -195,8 +204,16 @@ export const addAnimesToUser = async (
   console.log(`Found ${newEntries.length} new dubs to fetch.`);
 
   for (const entry of newEntries) {
+    // Log if not fully valid
+    if (!validateMedia(entry.media)) {
+      console.warn(`Adding unreleased or incomplete media ${entry.media.id}`);
+    }
     const dub = await fetchDubStatus(entry.media);
     if (dub) {
+      // Patch Dub if totalEpisodes is null
+      if (dub.totalEpisodes == null) {
+        dub.totalEpisodes = entry.media.episodes || 1;
+      }
       await UserDub.create({
         dubId: dub.id,
         userId: user.id,

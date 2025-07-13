@@ -39,16 +39,23 @@ const handleAnimeScheduleResponse = async (
   data: AnimeScheduleSearchResponse,
   media: Media
 ): Promise<Dub | null> => {
-  if (data.totalAmount !== 1) {
-    console.error(
-      `Expected 1 anime for ${media.id}, got ${
-        data.totalAmount
-      }. Routes: ${data.anime.map((a) => a.route).join(", ")}`
-    );
+  let anime: Anime | undefined;
+  if (data.totalAmount === 1) {
+    anime = data.anime[0];
+  } else if (data.totalAmount > 1) {
+    const episodes = media.episodes;
+
+    if (episodes) {
+      // Find anime with matching episode count
+      anime = data.anime.find((a) => a.episodes >= episodes - 1);
+    }
+  }
+
+  if (!anime) {
+    console.warn(`No anime found for Anilist ID ${media.id}`);
     return null;
   }
 
-  const anime = data.anime[0];
   const title = media.title.english || media.title.romaji;
 
   const isDubbed = anime.jpnTime !== anime.dubTime;
@@ -56,7 +63,7 @@ const handleAnimeScheduleResponse = async (
 
   if (!isDubbed) {
     console.log(`No dub available for ${title}`);
-
+    const totalEpisodes = anime.episodes ?? media.episodes ?? 1;
     return createOrUpdateDub(
       media.id,
       title!,
@@ -65,7 +72,7 @@ const handleAnimeScheduleResponse = async (
       false,
       false,
       0,
-      anime.episodes,
+      totalEpisodes,
       null
     );
   }
@@ -75,6 +82,7 @@ const handleAnimeScheduleResponse = async (
   }
 
   // Completed dub
+  const totalEpisodes = anime.episodes ?? media.episodes ?? 1;
   return createOrUpdateDub(
     media.id,
     title!,
@@ -82,8 +90,8 @@ const handleAnimeScheduleResponse = async (
     media.coverImage.extraLarge,
     true,
     false,
-    anime.episodes,
-    anime.episodes,
+    totalEpisodes,
+    totalEpisodes,
     null
   );
 };
@@ -101,7 +109,7 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
 
     if (!dubSection) {
       console.error(`No dub section found for ${anime.route}`);
-
+      const totalEpisodes = anime.episodes ?? media.episodes ?? 1;
       return createOrUpdateDub(
         media.id,
         title!,
@@ -110,7 +118,7 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
         false,
         false,
         0,
-        anime.episodes,
+        totalEpisodes,
         null
       );
     }
@@ -164,6 +172,9 @@ const createOrUpdateDub = async (
   totalEpisodes: number,
   nextAir: Date | null
 ): Promise<Dub> => {
+  // Always set totalEpisodes to a valid number
+  const safeTotalEpisodes =
+    typeof totalEpisodes === "number" && totalEpisodes > 0 ? totalEpisodes : 1;
   const [dub, created] = await Dub.findOrCreate({
     where: { anilistId },
     defaults: {
@@ -174,7 +185,7 @@ const createOrUpdateDub = async (
       hasDub,
       isReleasing,
       dubbedEpisodes,
-      totalEpisodes,
+      totalEpisodes: safeTotalEpisodes,
       nextAir,
     },
   });
@@ -187,7 +198,7 @@ const createOrUpdateDub = async (
       hasDub,
       isReleasing,
       dubbedEpisodes,
-      totalEpisodes,
+      totalEpisodes: safeTotalEpisodes,
       nextAir,
     });
   }
