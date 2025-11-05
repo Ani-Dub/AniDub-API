@@ -109,6 +109,8 @@ export default class AniDubBot extends Client {
 
   // Checks the database for finished dubs and notifies users
   private async _checkDubsDaily() {
+    await this._fetchNonReleasedDubs();
+
     const unfinishedDubs = await Dub.findAll({ where: { isReleasing: true } });
 
     const users = await User.findAll();
@@ -133,14 +135,26 @@ export default class AniDubBot extends Client {
       if (dub.isReleasing && !updated.isReleasing) {
         await this._notifyUsersDubFinished(dub);
       }
+    }
+  }
 
-      await dub.update({
-        hasDub: updated.hasDub,
-        isReleasing: updated.isReleasing,
-        dubbedEpisodes: updated.dubbedEpisodes,
-        totalEpisodes: updated.totalEpisodes,
-        nextAir: updated.nextAir,
-      });
+  // Check for dubs that were not released at the time of adding and update their status.
+  private async _fetchNonReleasedDubs() {
+    const nonReleasedDubs = await Dub.findAll({
+      where: { hasDub: false, isReleasing: false },
+    });
+
+    for (const dub of nonReleasedDubs) {
+      const media = {
+        id: dub.anilistId,
+        type: "ANIME" as const,
+        title: { english: dub.name, romaji: dub.name },
+        coverImage: { extraLarge: dub.coverImage },
+        status: "RELEASING" as const,
+        episodes: dub.totalEpisodes,
+      };
+
+      await fetchDubStatus(media);
     }
   }
 
