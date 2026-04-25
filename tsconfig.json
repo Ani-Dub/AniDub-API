@@ -3,14 +3,15 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "target": "es2020",
-    "moduleResolution": "node",
-    "module": "commonjs",
+    "moduleResolution": "node16",
+    "module": "node16",
     "rootDir": "src",
     "outDir": "dist",
     "strict": true,
     "skipLibCheck": true,
     "typeRoots": ["src/types"],
-    "isolatedModules": true
+    "isolatedModules": true,
+    "sourceMap": true
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

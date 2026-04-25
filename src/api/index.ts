@@ -9,10 +9,26 @@ import dubsRouter from "./dubs";
 
 export const app = express();
 
-app.use(cors());
-app.use(express.json());
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Private-Network", "true");
+  next();
+});
 
-app.set('trust proxy', 1);
+app.options("*", (req, res) => {
+  res.header("Access-Control-Allow-Origin", "https://anilist.co");
+  res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type");
+  res.header("Access-Control-Allow-Private-Network", "true");
+  res.sendStatus(204);
+});
+
+app.use(
+  cors({
+    origin: "https://anilist.co",
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  }),
+);
 
 // === Helper: Fetch Access Token from Anilist ===
 const fetchAccessToken = async (code: string) => {

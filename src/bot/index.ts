@@ -17,7 +17,7 @@ import { syncUser } from "../lib";
 
 type Command = (
   interaction: ChatInputCommandInteraction,
-  bot: AniDubBot
+  bot: AniDubBot,
 ) => Promise<void>;
 
 /**
@@ -165,7 +165,7 @@ export default class AniDubBot extends Client {
     const embed = new EmbedBuilder()
       .setTitle("🎉 Dub Completed!")
       .setDescription(
-        `The dub for **${dub.name}** has officially finished airing.`
+        `The dub for **${dub.name}** has officially finished airing.`,
       )
       .setImage(dub.coverImage)
       .setURL("https://anilist.co/anime/" + dub.anilistId)
