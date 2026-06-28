@@ -101,12 +101,14 @@ const handleAnimeScheduleResponse = async (
 
   const isDubbed = anime.jpnTime !== anime.dubTime;
   const isOngoing = anime.status === "Ongoing";
+  const isFinished = anime.status === "Finished";
 
   logger.info("AnimeSchedule match selected", {
     anilistId: media.id,
     title,
     route: anime.route,
     status: anime.status,
+    isFinished,
     expectedEpisodes: media.episodes ?? 1,
     detectedEpisodes: anime.episodes ?? null,
     jpnTime: anime.jpnTime,
@@ -131,20 +133,39 @@ const handleAnimeScheduleResponse = async (
     );
   }
 
-  if (isOngoing) {
+  // If the dub is ongoing or AnimeSchedule reports a dub time but the series isn't marked finished,
+  // scrape the anime page for more precise info (next air, isReleasing, current dubbed episode).
+  if (isOngoing || (isDubbed && !isFinished)) {
     return scrapeOngoingDub(anime, media);
   }
 
-  // Completed dub
+  if (isFinished) {
+    // Completed dub
+    const totalEpisodes = anime.episodes ?? media.episodes ?? 1;
+    return createOrUpdateDub(
+      media.id,
+      title!,
+      anime.route,
+      media.coverImage.extraLarge,
+      true,
+      false,
+      totalEpisodes,
+      totalEpisodes,
+      null
+    );
+  }
+
+  // Fallback: no dub or unknown state
   const totalEpisodes = anime.episodes ?? media.episodes ?? 1;
+
   return createOrUpdateDub(
     media.id,
     title!,
     anime.route,
     media.coverImage.extraLarge,
-    true,
     false,
-    totalEpisodes,
+    false,
+    0,
     totalEpisodes,
     null
   );
@@ -157,7 +178,13 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
       `https://animeschedule.net/anime/${anime.route}`
     );
     const document = new JSDOM(res.data).window.document;
-    const dubSection = document.querySelector("h3.release-time-type-dub");
+    // Try multiple selectors to find the dub release section
+    let dubSection = document.querySelector("h3.release-time-type-dub") as Element | null;
+    if (!dubSection) dubSection = document.querySelector(".release-time-type-dub");
+    if (!dubSection) {
+      // Fallback: search headings/spans for text mentioning 'dub'
+      dubSection = Array.from(document.querySelectorAll("h1,h2,h3,h4,h5,span,div")).find((el) => /dub/i.test(el.textContent || "")) || null;
+    }
 
     const title = media.title.english || media.title.romaji;
 
@@ -181,8 +208,21 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
     }
 
     const dubSectionText = dubSection.textContent?.trim() || "";
-    const episodeMatch = dubSectionText.match(/episode\s*(\d+)/i) || dubSectionText.match(/ep\.?\s*(\d+)/i);
-    const episode = episodeMatch ? parseInt(episodeMatch[1], 10) : 0;
+
+    // Heuristic parsing for current dubbed episode:
+    // Prefer phrases like 'conclud... Episode X' or 'Episode X on DATE' for the last aired episode.
+    let episode = 0;
+    const concludedMatch = dubSectionText.match(/conclud(?:e|ed)[\s\S]{0,40}?episode\s*(\d+)/i);
+    if (concludedMatch) {
+      episode = parseInt(concludedMatch[1], 10);
+    } else {
+      const airedMatch = dubSectionText.match(/episode\s*(\d+)\s*(?:on|at)/i) || dubSectionText.match(/ep\.?\s*(\d+)\s*(?:on|at)/i);
+      if (airedMatch) episode = parseInt(airedMatch[1], 10);
+      else {
+        const anyMatch = dubSectionText.match(/episode\s*(\d+)/i) || dubSectionText.match(/ep\.?\s*(\d+)/i);
+        if (anyMatch) episode = parseInt(anyMatch[1], 10);
+      }
+    }
 
     if (!episode) {
       logger.warn("Could not parse episode number from dub section", {
@@ -192,8 +232,12 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
       });
     }
 
-    const nextAir =
-      dubSection.parentElement?.children[1]?.getAttribute("datetime");
+    // Find nearest element with a datetime attribute for next air — search within parent, then ancestors
+    let nextAir: string | null = null;
+    const searchForDatetime = (el: Element | null | undefined) => el ? (el.querySelector('[datetime]') as Element | null) : null;
+    nextAir = searchForDatetime(dubSection.parentElement)?.getAttribute('datetime') || null;
+    if (!nextAir) nextAir = searchForDatetime(dubSection.parentElement?.parentElement)?.getAttribute('datetime') || null;
+    if (!nextAir) nextAir = (document.querySelector('[datetime]') as Element | null)?.getAttribute('datetime') || null;
 
     logger.info("Parsed ongoing dub schedule", {
       anilistId: media.id,
