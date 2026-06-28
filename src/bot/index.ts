@@ -14,6 +14,9 @@ import { UserDub } from "../database/UserDub";
 import { User } from "../database/User";
 import { fetchDubStatus } from "../lib/animeschedule";
 import { syncUser } from "../lib";
+import { createLogger } from "../lib/logger";
+
+const logger = createLogger("bot");
 
 type Command = (
   interaction: ChatInputCommandInteraction,
@@ -41,7 +44,7 @@ export default class AniDubBot extends Client {
     this.on("interactionCreate", this._handleInteraction.bind(this));
 
     await this.login(DISCORD_TOKEN);
-    console.log("AniDub Bot is running");
+    logger.info("AniDub Bot is running");
   }
 
   // Handle slash command interactions
@@ -68,7 +71,7 @@ export default class AniDubBot extends Client {
     const commandEntries = Object.entries(commands);
 
     const commandJSONs = commandEntries.map(([name, { command }]) => {
-      console.log(`Registering command: ${name}`);
+      logger.info("Registering command", { name });
       return command.toJSON();
     });
 
@@ -80,7 +83,7 @@ export default class AniDubBot extends Client {
       this._commands.set(name, execute);
     });
 
-    console.log("Commands updated successfully");
+    logger.info("Commands updated successfully");
   }
 
   // Sends a direct message to the specified Discord user
@@ -89,7 +92,7 @@ export default class AniDubBot extends Client {
       const user = await this.users.fetch(discordId);
       await user?.send(message);
     } catch (error) {
-      console.error(`Failed to send DM to ${discordId}:`, error);
+      logger.error("Failed to send DM", { discordId }, error);
     }
   }
 
@@ -109,12 +112,15 @@ export default class AniDubBot extends Client {
 
   // Checks the database for finished dubs and notifies users
   private async _checkDubsDaily() {
+    logger.info("Starting daily dub check");
     await this._fetchNonReleasedDubs();
 
     const unfinishedDubs = await Dub.findAll({ where: { isReleasing: true } });
+    logger.info("Loaded unfinished dubs", { count: unfinishedDubs.length });
 
     const users = await User.findAll();
 
+    logger.info("Refreshing tracked users", { count: users.length });
     for (const user of users) {
       await syncUser(user);
     }
@@ -129,10 +135,29 @@ export default class AniDubBot extends Client {
         episodes: dub.totalEpisodes,
       };
 
+      logger.debug("Checking dub status", {
+        anilistId: dub.anilistId,
+        title: dub.name,
+        currentIsReleasing: dub.isReleasing,
+      });
       const updated = await fetchDubStatus(media);
       if (!updated) continue;
 
+      logger.info("Dub status comparison", {
+        anilistId: dub.anilistId,
+        title: dub.name,
+        previousIsReleasing: dub.isReleasing,
+        updatedIsReleasing: updated.isReleasing,
+        dubbedEpisodes: updated.dubbedEpisodes,
+        totalEpisodes: updated.totalEpisodes,
+        nextAir: updated.nextAir?.toISOString() || null,
+      });
+
       if (dub.isReleasing && !updated.isReleasing) {
+        logger.info("Triggering completion notification", {
+          anilistId: dub.anilistId,
+          title: dub.name,
+        });
         await this._notifyUsersDubFinished(dub);
       }
     }
@@ -143,6 +168,8 @@ export default class AniDubBot extends Client {
     const nonReleasedDubs = await Dub.findAll({
       where: { hasDub: false, isReleasing: false },
     });
+
+    logger.info("Refreshing non-released dub records", { count: nonReleasedDubs.length });
 
     for (const dub of nonReleasedDubs) {
       const media = {
@@ -161,6 +188,12 @@ export default class AniDubBot extends Client {
   // Notify all users tracking a specific dub that it has finished
   private async _notifyUsersDubFinished(dub: Dub) {
     const userDubs = await UserDub.findAll({ where: { dubId: dub.id } });
+    logger.info("Notifying users of completed dub", {
+      dubId: dub.id,
+      anilistId: dub.anilistId,
+      title: dub.name,
+      subscriberCount: userDubs.length,
+    });
 
     const embed = new EmbedBuilder()
       .setTitle("🎉 Dub Completed!")
@@ -184,7 +217,7 @@ export default class AniDubBot extends Client {
           const discordUser = await this.users.fetch(user.discordId);
           await discordUser.send({ embeds: [embed] });
         } catch (error) {
-          console.error(`Failed to send embed DM to ${user.discordId}:`, error);
+          logger.error("Failed to send embed DM", { discordId: user.discordId }, error);
         }
       }
     }

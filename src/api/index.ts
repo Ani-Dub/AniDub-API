@@ -32,13 +32,22 @@ app.use(
 
 // === Helper: Fetch Access Token from Anilist ===
 const fetchAccessToken = async (code: string) => {
-  return axios.post("https://anilist.co/api/v2/oauth/token", {
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-    code,
-    redirect_uri: REDIRECT_URL,
-    grant_type: "authorization_code",
-  });
+  return axios.post(
+    "https://anilist.co/api/v2/oauth/token",
+    {
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      code,
+      redirect_uri: REDIRECT_URL,
+      grant_type: "authorization_code",
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    }
+  );
 };
 
 // === Helper: Render Success HTML Page ===
@@ -91,12 +100,37 @@ app.get("/oauth2/callback", async (req, res) => {
     if (user.accessToken) return res.status(400).send("User already linked");
 
     const tokenResponse = await fetchAccessToken(code);
-    const { access_token, refresh_token, expires_in } = tokenResponse.data;
+    const responseData = tokenResponse.data ?? {};
+
+    if (typeof responseData === "string") {
+      console.error("AniList token endpoint returned HTML/text instead of JSON", responseData.slice(0, 500));
+      throw new Error("Invalid access token response");
+    }
+
+    const { access_token, refresh_token, expires_in } = responseData as {
+      access_token?: unknown;
+      refresh_token?: unknown;
+      expires_in?: unknown;
+    };
+
+    if (
+      typeof access_token !== "string" ||
+      typeof refresh_token !== "string" ||
+      typeof expires_in !== "number"
+    ) {
+      console.error("Invalid access token response", responseData);
+      throw new Error("Invalid access token response");
+    }
+
+    const nextExpiresAt = new Date(Date.now() + expires_in * 1000);
+    if (Number.isNaN(nextExpiresAt.getTime())) {
+      throw new Error("Calculated access token expiry is invalid");
+    }
 
     await user.update({
       accessToken: access_token,
       refreshToken: refresh_token,
-      expiresAt: new Date(Date.now() + expires_in * 1000),
+      expiresAt: nextExpiresAt,
     });
 
     syncUser(user);

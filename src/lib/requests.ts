@@ -94,11 +94,20 @@ export async function repeatableGETRequest<T>(
 
 // Centralized token refresh function
 export const refreshAccessToken = async (refreshToken: string) => {
-  return axios.post("https://anilist.co/api/v2/oauth/token", {
-    client_id: CLIENT_ID,
-    client_secret: CLIENT_SECRET,
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-    redirect_uri: REDIRECT_URL,
-  });
+  return axios.post(
+    "https://anilist.co/api/v2/oauth/token",
+    {
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+      redirect_uri: REDIRECT_URL,
+    },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+    }
+  );
 };

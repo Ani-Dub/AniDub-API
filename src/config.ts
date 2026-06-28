@@ -6,7 +6,6 @@ const requiredEnvKeys = [
   "ANIMESCHEDULE_TOKEN",
   "CLIENT_ID",
   "CLIENT_SECRET",
-  "REDIRECT_URL",
   "DB_HOST",
   "DB_PORT",
   "DB_USER",
@@ -22,13 +21,19 @@ for (const key of requiredEnvKeys) {
   }
 }
 
+const redirectUrl = process.env.PROD_REDIRECT_URL || process.env.REDIRECT_URL;
+
+if (!redirectUrl) {
+  throw new Error("Either REDIRECT_URL or PROD_REDIRECT_URL must be defined in .env file");
+}
+
 // AnimeSchedule
 export const ANIMESCHEDULE_TOKEN = process.env.ANIMESCHEDULE_TOKEN as string;
 
 // Anilist
 export const CLIENT_ID = process.env.CLIENT_ID as string;
 export const CLIENT_SECRET = process.env.CLIENT_SECRET as string;
-export const REDIRECT_URL = process.env.REDIRECT_URL as string;
+export const REDIRECT_URL = redirectUrl as string;
 
 // Database
 export const DB_HOST = process.env.DB_HOST as string;

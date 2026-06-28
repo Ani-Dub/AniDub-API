@@ -4,32 +4,69 @@ import { Dub } from "../database/Dub";
 import { Media } from "../types/anilist";
 import { Anime, AnimeScheduleSearchResponse } from "../types/animeschedule";
 import { repeatableGETRequest } from "./requests";
+import { createLogger } from "./logger";
+
+const logger = createLogger("animeschedule");
 
 // Entry point: fetches dub status for a given media
 export const fetchDubStatus = async (media: Media): Promise<Dub | null> => {
   const { id: anilistId } = media;
 
+  logger.info("Fetching dub status", {
+    anilistId,
+    title: media.title?.english || media.title?.romaji || "unknown",
+  });
+
   try {
+    const requestConfig = {
+      params: { "anilist-ids": anilistId },
+      headers: {
+        Authorization: `Bearer ${ANIMESCHEDULE_TOKEN}`,
+      },
+    };
+
+    logger.info("Sending AnimeSchedule request", {
+      url: "https://animeschedule.net/api/v3/anime",
+      anilistId,
+      params: requestConfig.params,
+      hasToken: Boolean(ANIMESCHEDULE_TOKEN),
+    });
+
     const response = await repeatableGETRequest<AnimeScheduleSearchResponse>(
       "https://animeschedule.net/api/v3/anime",
-      {
-        params: { "anilist-ids": anilistId },
-        headers: {
-          Authorization: `Bearer ${ANIMESCHEDULE_TOKEN}`,
-        },
-      }
+      requestConfig
     );
 
     if (response.status !== 200) {
-      console.error(
-        `AnimeSchedule API error (${anilistId}): ${response.status}`
-      );
+      logger.error("AnimeSchedule API error", {
+        anilistId,
+        status: response.status,
+      });
       return null;
     }
 
+    logger.info("AnimeSchedule response summary", {
+      anilistId,
+      status: response.status,
+      totalAmount: response.data.totalAmount,
+      candidates: response.data.anime.slice(0, 5).map((entry) => ({
+        title: entry.title,
+        route: entry.route,
+        episodes: entry.episodes,
+        status: entry.status,
+        jpnTime: entry.jpnTime,
+        dubTime: entry.dubTime,
+      })),
+    });
+
+    logger.debug("AnimeSchedule response payload", {
+      anilistId,
+      payload: response.data,
+    });
+
     return await handleAnimeScheduleResponse(response.data, media);
   } catch (error) {
-    console.error(`Error fetching dub status for ${anilistId}:`, error);
+    logger.error("Error fetching dub status", { anilistId }, error);
     return null;
   }
 };
@@ -52,7 +89,11 @@ const handleAnimeScheduleResponse = async (
   }
 
   if (!anime) {
-    console.warn(`No anime found for Anilist ID ${media.id}`);
+    logger.warn("No anime found in AnimeSchedule response", {
+      anilistId: media.id,
+      totalAmount: data.totalAmount,
+      episodes: media.episodes,
+    });
     return null;
   }
 
@@ -61,8 +102,21 @@ const handleAnimeScheduleResponse = async (
   const isDubbed = anime.jpnTime !== anime.dubTime;
   const isOngoing = anime.status === "Ongoing";
 
+  logger.info("AnimeSchedule match selected", {
+    anilistId: media.id,
+    title,
+    route: anime.route,
+    status: anime.status,
+    expectedEpisodes: media.episodes ?? 1,
+    detectedEpisodes: anime.episodes ?? null,
+    jpnTime: anime.jpnTime,
+    dubTime: anime.dubTime,
+    isDubbed,
+    isOngoing,
+  });
+
   if (!isDubbed) {
-    console.log(`No dub available for ${title}`);
+    logger.info("No dub available", { anilistId: media.id, title });
     const totalEpisodes = anime.episodes ?? media.episodes ?? 1;
     return createOrUpdateDub(
       media.id,
@@ -108,7 +162,10 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
     const title = media.title.english || media.title.romaji;
 
     if (!dubSection) {
-      console.error(`No dub section found for ${anime.route}`);
+      logger.warn("No dub section found while scraping ongoing dub", {
+        route: anime.route,
+        anilistId: media.id,
+      });
       const totalEpisodes = anime.episodes ?? media.episodes ?? 1;
       return createOrUpdateDub(
         media.id,
@@ -123,14 +180,31 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
       );
     }
 
-    const episodeStr = dubSection.children[0]?.textContent?.split(" ")[1];
-    const episode = episodeStr ? parseInt(episodeStr, 10) : 0;
+    const dubSectionText = dubSection.textContent?.trim() || "";
+    const episodeMatch = dubSectionText.match(/episode\s*(\d+)/i) || dubSectionText.match(/ep\.?\s*(\d+)/i);
+    const episode = episodeMatch ? parseInt(episodeMatch[1], 10) : 0;
 
-    if (!episode)
-      console.error(`Could not parse episode number for ${anime.route}`);
+    if (!episode) {
+      logger.warn("Could not parse episode number from dub section", {
+        route: anime.route,
+        anilistId: media.id,
+        dubSectionText,
+      });
+    }
 
     const nextAir =
       dubSection.parentElement?.children[1]?.getAttribute("datetime");
+
+    logger.info("Parsed ongoing dub schedule", {
+      anilistId: media.id,
+      title,
+      route: anime.route,
+      dubSectionText,
+      detectedEpisode: episode,
+      expectedTotalEpisodes: anime.episodes ?? media.episodes ?? 1,
+      nextAir: nextAir ?? null,
+      isReleasing: Boolean(nextAir),
+    });
 
     return createOrUpdateDub(
       media.id,
@@ -144,7 +218,7 @@ const scrapeOngoingDub = async (anime: Anime, media: Media): Promise<Dub> => {
       nextAir ? new Date(nextAir) : null
     );
   } catch (error) {
-    console.error(`Error scraping dub info for ${anime.route}:`, error);
+    logger.error("Error scraping dub info", { route: anime.route, anilistId: media.id }, error);
 
     return createOrUpdateDub(
       media.id,
@@ -191,6 +265,14 @@ const createOrUpdateDub = async (
   });
 
   if (!created) {
+    logger.debug("Updating existing dub record", {
+      anilistId,
+      name,
+      hasDub,
+      isReleasing,
+      dubbedEpisodes,
+      totalEpisodes: safeTotalEpisodes,
+    });
     await dub.update({
       name,
       animescheduleSlug: slug,
@@ -202,5 +284,16 @@ const createOrUpdateDub = async (
       nextAir,
     });
   }
+
+  logger.info("Persisted dub status", {
+    anilistId,
+    name,
+    hasDub,
+    isReleasing,
+    dubbedEpisodes,
+    totalEpisodes: safeTotalEpisodes,
+    nextAir: nextAir ? nextAir.toISOString() : null,
+  });
+
   return dub;
 };

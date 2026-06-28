@@ -33,13 +33,24 @@ router.use(limiter, async (req, res, next) => {
     }
 
     if (user.expiresAt < new Date()) {
-      const refreshToken = await refreshAccessToken(user.refreshToken);
-      const { access_token, refresh_token, expires_in } = refreshToken.data;
+      console.info(`Refreshing AniList token for user ${user.id}`);
+      const refreshTokenResponse = await refreshAccessToken(user.refreshToken);
+      const { access_token, refresh_token, expires_in } = refreshTokenResponse.data ?? {};
+
+      if (!access_token || !refresh_token || typeof expires_in !== "number") {
+        console.error("Invalid refresh token response", refreshTokenResponse.data);
+        throw new Error("Invalid refresh token response");
+      }
+
+      const nextExpiresAt = new Date(Date.now() + expires_in * 1000);
+      if (Number.isNaN(nextExpiresAt.getTime())) {
+        throw new Error("Calculated refresh token expiry is invalid");
+      }
 
       await user.update({
         accessToken: access_token,
         refreshToken: refresh_token,
-        expiresAt: new Date(Date.now() + expires_in * 1000),
+        expiresAt: nextExpiresAt,
       });
     }
 

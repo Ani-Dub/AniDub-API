@@ -140,7 +140,12 @@ export const syncUser = async (user: User): Promise<void> => {
     return;
   }
 
-  const allLists = response.data.data.MediaListCollection.lists;
+  const allLists = response.data?.data?.MediaListCollection?.lists ?? [];
+  if (allLists.length === 0) {
+    console.warn(`No media lists returned for user ${user.id}.`);
+    return;
+  }
+
   // Filter out Dropped lists
   const filteredLists = allLists.filter(
     (list: { name: string }) => list.name !== "Dropped"
@@ -274,7 +279,9 @@ export const createDubByAnilistId = async (
 
   if (res.status !== 200) return null;
 
-  const media = res.data.data.Media;
+  const media = res.data?.data?.Media;
+  if (!media) return null;
+
   const hasValidTitle = media.title.english || media.title.romaji;
 
   if (!hasValidTitle || !media.episodes) return null;
@@ -297,10 +304,10 @@ export const removeStaleEntries = async (
   user: User,
   entries: MediaListEntry[]
 ) => {
-  const userDubs = await UserDub.findAll({ where: { id: user.id } });
+  const userDubs = await UserDub.findAll({ where: { userId: user.id } });
 
   const staleUserDub = userDubs.filter(
-    (userDub) => !entries.find((entry) => entry.id === userDub.dubId)
+    (userDub) => !entries.some((entry) => entry.media?.id === userDub.anilistId)
   );
 
   console.log(`Found ${staleUserDub.length} stale dubs to remove.`);
