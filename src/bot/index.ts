@@ -15,6 +15,7 @@ import { User } from "../database/User";
 import { fetchDubStatus } from "../lib/animeschedule";
 import { syncUser } from "../lib";
 import { createLogger } from "../lib/logger";
+import { Op } from "sequelize";
 
 const logger = createLogger("bot");
 
@@ -116,7 +117,24 @@ export default class AniDubBot extends Client {
     await this._fetchNonReleasedDubs();
 
     const unfinishedDubs = await Dub.findAll({ where: { isReleasing: true } });
-    logger.info("Loaded unfinished dubs", { count: unfinishedDubs.length });
+    // Recheck recent transitions so a previously misclassified dub can
+    // recover when AnimeSchedule shows its next episode again.
+    const recentCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const recentCompletedDubs = await Dub.findAll({
+      where: {
+        hasDub: true,
+        isReleasing: false,
+        updatedAt: { [Op.gte]: recentCutoff },
+      },
+    });
+    const recoveryDubs = recentCompletedDubs.filter(
+      (dub) => dub.updatedAt.getTime() - dub.createdAt.getTime() > 60 * 60 * 1000
+    );
+    const dubsToCheck = [...unfinishedDubs, ...recoveryDubs];
+    logger.info("Loaded dubs for status check", {
+      unfinished: unfinishedDubs.length,
+      recovery: recoveryDubs.length,
+    });
 
     const users = await User.findAll();
 
@@ -125,7 +143,7 @@ export default class AniDubBot extends Client {
       await syncUser(user);
     }
 
-    for (const dub of unfinishedDubs) {
+    for (const dub of dubsToCheck) {
       const media = {
         id: dub.anilistId,
         type: "ANIME" as const,
@@ -154,11 +172,28 @@ export default class AniDubBot extends Client {
       });
 
       if (dub.isReleasing && !updated.isReleasing) {
-        logger.info("Triggering completion notification", {
-          anilistId: dub.anilistId,
-          title: dub.name,
-        });
-        await this._notifyUsersDubFinished(dub);
+        // A status transition alone can be caused by a temporary scrape gap.
+        // The final episode must have been observed before this check.
+        const finalEpisodeObserved =
+          dub.totalEpisodes > 0 &&
+          dub.dubbedEpisodes >= dub.totalEpisodes &&
+          updated.hasDub &&
+          updated.dubbedEpisodes >= updated.totalEpisodes;
+
+        if (finalEpisodeObserved) {
+          logger.info("Triggering completion notification", {
+            anilistId: dub.anilistId,
+            title: dub.name,
+          });
+          await this._notifyUsersDubFinished(dub);
+        } else {
+          logger.warn("Skipping unconfirmed dub completion", {
+            anilistId: dub.anilistId,
+            title: dub.name,
+            previousDubbedEpisodes: dub.dubbedEpisodes,
+            totalEpisodes: dub.totalEpisodes,
+          });
+        }
       }
     }
   }
