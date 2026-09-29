@@ -186,7 +186,9 @@ const scrapeDubSchedule = async (anime: Anime, media: Media): Promise<Dub> => {
     anime.status === "Finished" &&
     existing !== null &&
     existing.isReleasing &&
-    existing.dubbedEpisodes >= totalEpisodes &&
+    // During a countdown, dubbedEpisodes excludes the scheduled episode.
+    // Equality also avoids trusting a stale 12/12 value from the old parser.
+    existing.dubbedEpisodes === totalEpisodes - 1 &&
     existing.nextAir !== null &&
     new Date(existing.nextAir).getTime() <= Date.now();
 
@@ -262,12 +264,22 @@ const scrapeDubSchedule = async (anime: Anime, media: Media): Promise<Dub> => {
       return keepDubStatus("no upcoming dub episode confirmed");
     }
 
+    // The heading is the NEXT dub episode, so it has not aired yet.
+    // Recompute from the page even when a previous false completion stored
+    // the full season as dubbed.
+    const releasedEpisodes = episode > 0
+      ? Math.min(totalEpisodes, episode - 1)
+      : existing?.isReleasing && existing.dubbedEpisodes < totalEpisodes
+        ? existing.dubbedEpisodes
+        : 0;
+
     logger.info("Parsed ongoing dub schedule", {
       anilistId: media.id,
       title,
       route: anime.route,
       dubSectionText,
       detectedEpisode: episode,
+      releasedEpisodes,
       expectedTotalEpisodes: totalEpisodes,
       nextAir,
       isReleasing: true,
@@ -280,7 +292,7 @@ const scrapeDubSchedule = async (anime: Anime, media: Media): Promise<Dub> => {
       media.coverImage.extraLarge,
       true,
       true,
-      Math.max(existing?.dubbedEpisodes ?? 0, episode),
+      releasedEpisodes,
       totalEpisodes,
       nextAirDate
     );

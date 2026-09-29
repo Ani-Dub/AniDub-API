@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test tests/*.test.cjs",
     "start": "tsc && node dist/index.js"
   },
   "author": "JonesBryan",

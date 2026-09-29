@@ -172,11 +172,13 @@ export default class AniDubBot extends Client {
       });
 
       if (dub.isReleasing && !updated.isReleasing) {
-        // A status transition alone can be caused by a temporary scrape gap.
-        // The final episode must have been observed before this check.
+        // The last scheduled episode was excluded from the previous released
+        // count. It must have aired before a completion notification is sent.
         const finalEpisodeObserved =
           dub.totalEpisodes > 0 &&
-          dub.dubbedEpisodes >= dub.totalEpisodes &&
+          dub.dubbedEpisodes === dub.totalEpisodes - 1 &&
+          dub.nextAir !== null &&
+          new Date(dub.nextAir).getTime() <= Date.now() &&
           updated.hasDub &&
           updated.dubbedEpisodes >= updated.totalEpisodes;
 
